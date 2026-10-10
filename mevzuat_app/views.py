@@ -1,3 +1,68 @@
-from django.shortcuts import render
+"""İnce view katmanı: istek al, servis/selector çağır, HTTP durumuyla dön."""
+from __future__ import annotations
 
-# Create your views here.
+import logging
+
+from rest_framework import status
+from rest_framework.permissions import AllowAny
+from rest_framework.request import Request
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from mevzuat_app.selectors import get_analytics_dashboard_metrics
+from mevzuat_app.serializers import (
+    AnalyticsDashboardSerializer,
+    ChatQueryRequestSerializer,
+    ChatQueryResponseSerializer,
+)
+from mevzuat_app.services import ChatPersistenceError, ChatService, RAGServiceError
+
+logger = logging.getLogger(__name__)
+
+
+class ChatQueryView(APIView):
+    """POST /api/v1/chat/query/"""
+
+    permission_classes = [AllowAny]
+    chat_service_class = ChatService
+
+    def post(self, request: Request) -> Response:
+        query_serializer = ChatQueryRequestSerializer(data=request.data)
+        query_serializer.is_valid(raise_exception=True)
+        validated_query = query_serializer.validated_data
+
+        try:
+            chat_result = self.chat_service_class().process_user_query(
+                question_text=validated_query["question"],
+                session_id=validated_query["session_id"],
+            )
+        except RAGServiceError:
+            logger.exception("RAG servisi yanıt veremedi.")
+            return Response(
+                {"detail": "Yanıt servisi şu anda kullanılamıyor."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except ChatPersistenceError:
+            logger.exception("Soru-cevap kaydı başarısız oldu.")
+            return Response(
+                {"detail": "Sorunuz kaydedilirken bir hata oluştu."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        return Response(
+            ChatQueryResponseSerializer(chat_result).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class AnalyticsDashboardView(APIView):
+    """GET /api/v1/analytics/dashboard/"""
+
+    permission_classes = [AllowAny]
+
+    def get(self, request: Request) -> Response:
+        analytics_summary = get_analytics_dashboard_metrics()
+        return Response(
+            AnalyticsDashboardSerializer(analytics_summary).data,
+            status=status.HTTP_200_OK,
+        )
