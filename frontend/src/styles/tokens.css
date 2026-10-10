@@ -1,0 +1,71 @@
+/* AlbaVerse tasarım token'ları. Tüm renkler buradan yönetilir. */
+:root,
+:root[data-theme='light'] {
+  color-scheme: light;
+  --canvas: #faf8f9;
+  --surface: #ffffff;
+  --surface-2: #f4eff1;
+  --fg: #29232a;
+  --fg-muted: #6b6270;
+  --line: #e6dce0;
+  --line-strong: #cfc1c7;
+
+  --primary: #7b213f;
+  --primary-hover: #5b1830;
+  --on-primary: #ffffff;
+  --brand: #7b213f;
+  --brand-soft: #f7ecef;
+  --on-brand-soft: #5b1830;
+  --rose: #c58a9b;
+  --deep: #5b1830;
+  --ring: #7b213f;
+
+  --success: #1d7448;
+  --success-soft: #e5f3eb;
+  --warning: #8a5300;
+  --warning-soft: #fbf0dc;
+  --danger: #b3261e;
+  --danger-soft: #fbe9e7;
+  --on-danger: #ffffff;
+  --info: #285f94;
+  --info-soft: #e7f0f8;
+
+  --glass-bg: rgb(255 255 255 / 0.72);
+  --shadow-soft: 0 1px 2px rgb(41 35 42 / 0.06), 0 4px 16px rgb(41 35 42 / 0.05);
+  --shadow-pop: 0 10px 32px rgb(41 35 42 / 0.16);
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --canvas: #151014;
+  --surface: #1f181e;
+  --surface-2: #2a2129;
+  --fg: #f2ebee;
+  --fg-muted: #b8abb2;
+  --line: #3a2f37;
+  --line-strong: #55464f;
+
+  --primary: #a12e55;
+  --primary-hover: #b53a63;
+  --on-primary: #ffffff;
+  --brand: #e3a3b6;
+  --brand-soft: #3a2230;
+  --on-brand-soft: #f1c6d3;
+  --rose: #c58a9b;
+  --deep: #5b1830;
+  --ring: #e3a3b6;
+
+  --success: #6fd39b;
+  --success-soft: #1b2e24;
+  --warning: #e8b65c;
+  --warning-soft: #33281a;
+  --danger: #ff8f86;
+  --danger-soft: #3a1f1d;
+  --on-danger: #2a0f0d;
+  --info: #8dbdf0;
+  --info-soft: #1c2a38;
+
+  --glass-bg: rgb(31 24 30 / 0.7);
+  --shadow-soft: 0 1px 2px rgb(0 0 0 / 0.3), 0 4px 16px rgb(0 0 0 / 0.25);
+  --shadow-pop: 0 10px 32px rgb(0 0 0 / 0.5);
+}
