@@ -11,6 +11,7 @@ from django.db import DatabaseError, transaction
 from mevzuat_app import selectors
 from mevzuat_app.models import Cevap, Soru
 from mevzuat_app.selectors import MevzuatCitation
+from mevzuat_app.ai.rag_service import RAGService as OllamaRAGService
 
 
 class RAGServiceError(Exception):
@@ -75,7 +76,7 @@ class ChatService:
     """Kullanıcı sorusunu RAG'a iletir ve soru-cevap çiftini tek işlemde kaydeder."""
 
     def __init__(self, rag_service: RAGServiceProtocol | None = None) -> None:
-        self._rag_service: RAGServiceProtocol = rag_service or MockRAGService()
+        self._rag_service: RAGServiceProtocol = rag_service or OllamaRAGService()
 
     def process_user_query(self, *, question_text: str, session_id: uuid.UUID) -> ChatResult:
         # Yavaş LLM çağrısı transaction dışında yapılır; veritabanı kilitlenmez.
