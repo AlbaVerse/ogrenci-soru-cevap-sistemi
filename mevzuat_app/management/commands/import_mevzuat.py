@@ -1,4 +1,5 @@
 import os
+from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.utils.text import slugify
 import pdfplumber
@@ -10,8 +11,20 @@ class Command(BaseCommand):
     help = "PDF veya Word formatındaki mevzuat dosyalarını işler ve veritabanına aktarır."
 
     def add_arguments(self, parser):
-        parser.add_argument("--path", type=str, required=True, help="Dosya veya klasör yolu")
-        parser.add_argument("--category", type=str, required=True, help="Mevzuat kategorisi")
+        parser.add_argument(
+            "--path",
+            type=str,
+            required=False,
+            default=None,
+            help="Dosya veya klasör yolu (belirtilmezse varsayılan mevzuat klasörleri taranır)"
+        )
+        parser.add_argument(
+            "--category",
+            type=str,
+            required=False,
+            default=None,
+            help="Mevzuat kategorisi"
+        )
         parser.add_argument("--chunk-size", type=int, default=1200, help="Karakter bazlı parça boyutu")
         parser.add_argument("--overlap", type=int, default=150, help="Parçalar arası örtüşme boyutu")
 
@@ -42,14 +55,9 @@ class Command(BaseCommand):
             start += max(chunk_size - overlap, 1)
         return chunks
 
-    def handle(self, *args, **options):
-        path = options["path"]
-        category_name = options["category"]
-        chunk_size = options["chunk_size"]
-        overlap = options["overlap"]
-
-        if not os.path.exists(path):
-            self.stdout.write(self.style.ERROR(f"Dosya veya yol bulunamadı: {path}"))
+    def process_target(self, target_path, category_name, chunk_size, overlap):
+        if not os.path.exists(target_path):
+            self.stdout.write(self.style.WARNING(f"Yol bulunamadı: {target_path}"))
             return
 
         kategori, _ = Kategori.objects.get_or_create(
@@ -58,15 +66,15 @@ class Command(BaseCommand):
         )
 
         files_to_process = []
-        if os.path.isfile(path):
-            files_to_process.append(path)
-        elif os.path.isdir(path):
-            for root, _, files in os.walk(path):
+        if os.path.isfile(target_path):
+            files_to_process.append(target_path)
+        elif os.path.isdir(target_path):
+            for root, _, files in os.walk(target_path):
                 for f in files:
                     if f.lower().endswith((".pdf", ".docx")):
                         files_to_process.append(os.path.join(root, f))
 
-        self.stdout.write(self.style.NOTICE(f"Toplam {len(files_to_process)} dosya işlenecek..."))
+        self.stdout.write(self.style.NOTICE(f"[{category_name}] Toplam {len(files_to_process)} dosya işlenecek..."))
 
         for file_path in files_to_process:
             file_name = os.path.basename(file_path)
@@ -105,3 +113,32 @@ class Command(BaseCommand):
                 )
 
             self.stdout.write(self.style.SUCCESS(f"Aktarıldı: {file_name} -> {len(chunks)} parça oluşturuldu."))
+
+    def handle(self, *args, **options):
+        path = options.get("path")
+        category_name = options.get("category")
+        chunk_size = options["chunk_size"]
+        overlap = options["overlap"]
+
+        if path:
+            cat = category_name or "Genel"
+            self.process_target(path, cat, chunk_size, overlap)
+        else:
+            default_folders = {
+                "YÖNETMELİKLER": "Yönetmelik",
+                "YÖNERGELER": "Yönerge",
+                "USUL ESASLAR": "Usul ve Esaslar",
+                "POLİTİKALAR VE REHBERLİK": "Rehberlik ve Politikalar",
+                "YÖK MEVZUAT": "YÖK Mevzuatı",
+            }
+            base_dir = settings.BASE_DIR
+            self.stdout.write("Varsayılan mevzuat klasörleri taranıyor...")
+
+            for folder_name, cat in default_folders.items():
+                folder_path = os.path.join(base_dir, folder_name)
+                if os.path.exists(folder_path):
+                    self.process_target(folder_path, cat, chunk_size, overlap)
+                else:
+                    self.stdout.write(self.style.WARNING(f"Klasör atlandı (bulunamadı): {folder_name}"))
+
+        self.stdout.write(self.style.SUCCESS("Mevzuat aktarım işlemi tamamlandı."))

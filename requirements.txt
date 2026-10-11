@@ -1,2 +1,5 @@
 pypdf
 ollama
+
+pdfplumber
+python-docx
