@@ -1,4 +1,4 @@
-import os
+﻿import os
 from django.core.management.base import BaseCommand
 from django.utils.text import slugify
 import pdfplumber
@@ -88,6 +88,7 @@ class Command(BaseCommand):
                 defaults={'category': kategori}
             )
 
+            Kaynak.objects.filter(mevzuat=mevzuat).delete()
             chunks = self.chunk_text(text)
             for idx, chunk in enumerate(chunks):
                 kaynak_kwargs = {'mevzuat': mevzuat}

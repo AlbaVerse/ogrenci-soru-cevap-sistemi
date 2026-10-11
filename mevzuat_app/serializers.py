@@ -1,4 +1,4 @@
-"""Chat ve analitik uç noktalarının giriş/çıkış sözleşmeleri."""
+﻿"""Chat ve analitik uç noktalarının giriş/çıkış sözleşmeleri."""
 from __future__ import annotations
 
 import uuid
