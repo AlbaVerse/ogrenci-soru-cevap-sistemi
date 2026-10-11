@@ -1,4 +1,4 @@
-import { AppError } from './AppError'
+﻿import { AppError } from './AppError'
 
 const invalid = () => { throw new AppError({ status: 502, code: 'invalid_response', message: 'Sohbet servisi beklenmeyen bir yanıt gönderdi.' }) }
 const arrayOf = (data) => Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : Array.isArray(data?.results) ? data.results : invalid()
@@ -10,6 +10,8 @@ function source(raw) {
     page: raw.page ?? null,
     article: raw.article ?? null,
     url: raw.url || raw.file_url || null,
+    snippet: raw.snippet || raw.content || null,
+    content: raw.snippet || raw.content || null,
   }
 }
 
@@ -61,3 +63,5 @@ export function mapHomeOverview(raw) {
     isDemo: false,
   }
 }
+
+

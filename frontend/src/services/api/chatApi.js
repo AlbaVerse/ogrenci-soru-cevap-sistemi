@@ -1,61 +1,160 @@
-import { http } from './httpClient'
-import { mapConversation, mapConversations, mapHomeOverview, mapMessage } from '@/services/adapters/chatMapper'
+﻿import { http } from "./httpClient"
+import { mapConversation, mapConversations, mapMessage } from "@/services/adapters/chatMapper"
 
-// TASLAK API: gerçek Django sözleşmesi netleşince yalnızca bu dosya ve mapper değiştirilir.
-const conversations = '/conversations/'
-const conversation = (id) => `${conversations}${encodeURIComponent(id)}/`
-const message = (id) => `/messages/${encodeURIComponent(id)}/`
+const STORAGE_KEY = "albaverse_chat_sessions"
+
+function loadStorage() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    return raw ? JSON.parse(raw) : {}
+  } catch {
+    return {}
+  }
+}
+
+function saveStorage(sessions) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions))
+  } catch (err) {
+    console.error("Storage save error:", err)
+  }
+}
 
 export const chatApi = {
-  async listConversations({ search = '' } = {}) {
-    return mapConversations(await http.get(conversations, { query: { search } }))
+  async listConversations() {
+    const sessions = loadStorage()
+    const list = Object.values(sessions).map((c) => ({
+      id: c.id,
+      title: c.title || "Yeni sohbet",
+      created_at: c.created_at,
+      updated_at: c.updated_at,
+      message_count: Array.isArray(c.messages) ? c.messages.length : 0,
+    }))
+    list.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at))
+    return mapConversations(list)
   },
+
   async getConversation(id) {
-    return mapConversation(await http.get(conversation(id)))
+    const sessions = loadStorage()
+    const conv = sessions[id]
+    return conv ? mapConversation(conv) : null
   },
-  async createConversation({ category = null } = {}) {
-    return mapConversation(await http.post(conversations, { category }))
+
+  async createConversation(params) {
+    const newId = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `session-${Date.now()}`
+    const now = new Date().toISOString()
+    const newConv = {
+      id: newId,
+      title: "Yeni sohbet",
+      category: params?.category || null,
+      created_at: now,
+      updated_at: now,
+      messages: [],
+    }
+    const sessions = loadStorage()
+    sessions[newId] = newConv
+    saveStorage(sessions)
+    return mapConversation(newConv)
   },
+
   async renameConversation(id, title) {
-    return mapConversation(await http.patch(conversation(id), { title }))
+    const sessions = loadStorage()
+    if (sessions[id]) {
+      sessions[id].title = title
+      saveStorage(sessions)
+      return mapConversation(sessions[id])
+    }
+    return null
   },
+
   async deleteConversation(id) {
-    await http.delete(conversation(id))
+    const sessions = loadStorage()
+    delete sessions[id]
+    saveStorage(sessions)
     return true
   },
-  // Yanıtta { conversation, user_message, assistant_message } veya doğrudan conversation nesnesi kabul edilir.
+
   async sendMessage(id, content) {
-    const data = await http.post(`${conversation(id)}messages/`, { content })
-    if (data?.conversation) return {
-      conversation: mapConversation(data.conversation),
-      userMessage: data.user_message ? mapMessage(data.user_message) : null,
-      assistantMessage: data.assistant_message ? mapMessage(data.assistant_message) : null,
+    const sessionId = id || "default-session"
+
+    const response = await http.post("/chat/query/", {
+      question: content,
+      session_id: sessionId,
+    })
+
+    const now = new Date().toISOString()
+
+    const userMsgRaw = {
+      id: `u-${Date.now()}`,
+      role: "user",
+      content: content,
+      created_at: now,
+      sources: [],
     }
-    return { conversation: mapConversation(data), userMessage: null, assistantMessage: null }
+
+    const sourcesFormatted = Array.isArray(response?.sources)
+      ? response.sources.map((s, idx) => ({
+          document_id: s.id || idx + 1,
+          title: s.title || s.source_file || "Mevzuat Kaynağı",
+          article: s.article || null,
+          page: s.page || null,
+          snippet: s.snippet || s.text || s.content || "",
+          content: s.snippet || s.text || s.content || "",
+          url: s.source_file ? `/media/${s.source_file}` : null,
+        }))
+      : []
+
+    const assistantMsgRaw = {
+      id: String(response?.question_id || `bot-${Date.now()}`),
+      role: "assistant",
+      content: response?.answer || "Yanıt alınamadı.",
+      created_at: now,
+      response_time_ms: response?.response_time_ms ?? null,
+      sources: sourcesFormatted,
+    }
+
+    const sessions = loadStorage()
+    let conv = sessions[sessionId]
+    if (!conv) {
+      conv = {
+        id: sessionId,
+        title: content.slice(0, 32),
+        created_at: now,
+        updated_at: now,
+        messages: [],
+      }
+    }
+    conv.messages.push(userMsgRaw, assistantMsgRaw)
+    conv.updated_at = now
+    sessions[sessionId] = conv
+    saveStorage(sessions)
+
+    return {
+      conversation: mapConversation(conv),
+      userMessage: mapMessage(userMsgRaw),
+      assistantMessage: mapMessage(assistantMsgRaw),
+    }
   },
+
   async editMessage(conversationId, messageId, content) {
-    return mapConversation(await http.patch(message(messageId), { content, conversation_id: conversationId, regenerate: true, truncate_following: true }))
+    return this.sendMessage(conversationId, content)
   },
-  async regenerateMessage(conversationId, messageId) {
-    return mapConversation(await http.post(`${message(messageId)}regenerate/`, { conversation_id: conversationId }))
+
+  async regenerateMessage(conversationId) {
+    return this.getConversation(conversationId)
   },
-  async setFeedback(conversationId, messageId, rating) {
-    return mapMessage(await http.post(`${message(messageId)}feedback/`, { conversation_id: conversationId, rating }))
+
+  async setFeedback() {
+    return true
   },
-  async reportQuestion(conversationId, messageId) {
-    return mapMessage(await http.post('/question-reports/', { conversation_id: conversationId, message_id: messageId }))
+
+  async reportQuestion() {
+    return true
   },
 }
 
 export const homeApi = {
   async getOverview() {
-    // İki API taslaktır. Kısmi hata diğer ekranları etkilememeli.
-    const [stats, announcements] = await Promise.allSettled([
-      http.get('/stats/me/'), http.get('/announcements/', { query: { limit: 3 } }),
-    ])
-    if (stats.status === 'rejected' && announcements.status === 'rejected') throw stats.reason
-    const rawAnn = announcements.status === 'fulfilled' ? announcements.value : []
-    const records = Array.isArray(rawAnn) ? rawAnn : rawAnn?.items || rawAnn?.results || []
-    return mapHomeOverview({ summary: stats.status === 'fulfilled' ? stats.value : {}, announcements: records })
+    return { summary: {}, announcements: [] }
   },
 }

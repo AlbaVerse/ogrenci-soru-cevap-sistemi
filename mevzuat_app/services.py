@@ -1,16 +1,28 @@
-"""İş mantığı katmanı: RAG servisi (geçici mock) ve sohbet akışı."""
+"""İş mantığı katmanı: RAG servisi ve sohbet akışı."""
 from __future__ import annotations
 
-import random
+import logging
+import re
+import time
 import uuid
 from dataclasses import dataclass
 from typing import Protocol
 
 from django.db import DatabaseError, transaction
+from django.db.models import Q
 
 from mevzuat_app import selectors
-from mevzuat_app.models import Cevap, Soru
+from mevzuat_app.ai.ollama_client import OllamaClient, OllamaClientError
+from mevzuat_app.models import Cevap, Mevzuat, Soru
 from mevzuat_app.selectors import MevzuatCitation
+
+logger = logging.getLogger(__name__)
+
+
+def clean_turkish(text: str) -> str:
+    """Türkçe karakter duyarlı küçük harfe dönüştürme."""
+    table = str.maketrans({"İ": "i", "I": "ı", "Ş": "ş", "Ğ": "ğ", "Ü": "ü", "Ö": "ö", "Ç": "ç"})
+    return text.translate(table).lower()
 
 
 class RAGServiceError(Exception):
@@ -40,34 +52,116 @@ class ChatResult:
 
 
 class RAGServiceProtocol(Protocol):
-    """Fatma Sude'nin Ollama tabanlı gerçek servisi de bu sözleşmeye uymalıdır."""
+    def generate_answer(self, question: str) -> RAGResponse:
+        ...
 
-    def generate_answer(self, question_text: str) -> RAGResponse: ...
+
+class OllamaRAGService:
+    """Gerçek mevzuat verilerini tarayıp Ollama Qwen modeline bağlam sağlayan RAG servisi."""
+
+    def __init__(self, client: OllamaClient | None = None) -> None:
+        self.client = client or OllamaClient()
+
+    def _retrieve_relevant_chunks(self, question: str, limit: int = 5) -> list[Mevzuat]:
+        stop_words = {
+            "ve", "veya", "ile", "bir", "bu", "şu", "o", "ne", "nedir", "nelerdir",
+            "nasıl", "için", "mı", "mi", "mu", "mü", "var", "yok", "hakkında", "şartları", "neler"
+        }
+        
+        normalized = clean_turkish(question)
+        raw_words = re.findall(r"\b\w+\b", normalized)
+        
+        # Anlamlı kök / anahtar kelimeleri belirle
+        keywords = []
+        for word in raw_words:
+            if len(word) >= 3 and word not in stop_words:
+                keywords.append(word)
+
+        if not keywords:
+            keywords = [w for w in raw_words if len(w) >= 3]
+
+        if not keywords:
+            return list(Mevzuat.objects.all()[:limit])
+
+        # Arama: Sorudaki anahtar kelimelerden herhangi birini içeren parçaları topla
+        query_filter = Q()
+        for kw in keywords:
+            query_filter |= Q(content__icontains=kw) | Q(title__icontains=kw)
+
+        candidate_chunks = list(Mevzuat.objects.filter(query_filter).distinct()[:60])
+
+        if not candidate_chunks:
+            return list(Mevzuat.objects.all()[:limit])
+
+        # Parçaları sorudaki kelimelerin geçme sıklığına göre puanla
+        def score_chunk(chunk: Mevzuat) -> int:
+            content_lower = clean_turkish(chunk.content or "")
+            title_lower = clean_turkish(chunk.title or "")
+            score = 0
+            for kw in keywords:
+                if kw in title_lower:
+                    score += 5
+                score += content_lower.count(kw)
+            return score
+
+        candidate_chunks.sort(key=score_chunk, reverse=True)
+        return candidate_chunks[:limit]
+
+    def generate_answer(self, question: str) -> RAGResponse:
+        start_time = time.perf_counter()
+
+        # 1. Retrieval
+        relevant_mevzuats = self._retrieve_relevant_chunks(question, limit=5)
+        mevzuat_ids = [m.id for m in relevant_mevzuats]
+
+        context_texts = []
+        for m in relevant_mevzuats:
+            doc_title = m.title or (m.category.name if m.category else "Yönetmelik")
+            context_texts.append(f"[KAYNAK: {doc_title} - Dosya: {m.source_file or 'Bilinmiyor'}]\n{m.content.strip()[:1800]}")
+
+        context_block = "\n\n".join(context_texts)
+
+        # 2. Augmented Generation
+        system_prompt = (
+            "Sen üniversitenin resmî mevzuat ve akademik danışmanısın. "
+            "Sana verilen mevzuat metinlerindeki somut maddeleri, yüzdeleri, şartları ve kuralları kullanarak "
+            "öğrencinin sorusuna açık, doğrudan ve maddeler halinde net bir yanıt ver."
+        )
+
+        user_prompt = f"""AŞAĞIDAKİ ÜNİVERSİTE MEVZUAT METİNLERİNİ İNCELE:
+
+{context_block}
+
+ÖĞRENCİNİN SORUSU:
+{question}
+
+Yukarıda verilen yönetmelik maddelerine göre soruyu somut verilerle ve maddeler halinde açıkla:"""
+
+        try:
+            raw_answer = self.client.generate(prompt=user_prompt, system=system_prompt)
+        except OllamaClientError as exc:
+            logger.error(f"Ollama yanıt veremedi: {exc}")
+            raise RAGServiceError(str(exc)) from exc
+
+        elapsed_ms = int((time.perf_counter() - start_time) * 1000)
+
+        return RAGResponse(
+            answer_text=raw_answer,
+            mevzuat_ids=mevzuat_ids,
+            confidence_score=0.95,
+            response_time_ms=elapsed_ms,
+        )
 
 
 class MockRAGService:
-    """Gerçek RAG servisi hazır olana kadar frontend'in çalışabilmesi için sahte yanıt üretir."""
+    """Test amaçlı mock servis."""
 
-    MIN_LATENCY_MS: int = 120
-    MAX_LATENCY_MS: int = 300
-    FIXED_CONFIDENCE: float = 0.95
-    MAX_MOCK_CITATIONS: int = 2
-
-    def generate_answer(self, question_text: str) -> RAGResponse:
-        referenced_mevzuat_ids = selectors.get_default_mevzuat_ids(limit=self.MAX_MOCK_CITATIONS)
-        simulated_latency_ms = random.randint(self.MIN_LATENCY_MS, self.MAX_LATENCY_MS)
-        mock_answer_text = (
-            f"\"{question_text}\" sorunuz ilgili üniversite mevzuatı çerçevesinde değerlendirilmiştir. "
-            "Önlisans ve Lisans Eğitim-Öğretim Yönetmeliği uyarınca başvuru koşulları, "
-            "akademik not ortalaması ve kontenjan şartları ilgili birimin kurul kararıyla belirlenir. "
-            "Ayrıntılı bilgi için ilgili yönetmelik maddelerine ve öğrenci işleri birimine başvurunuz. "
-            "(Bu yanıt geçici test servisi tarafından üretilmiştir.)"
-        )
+    def generate_answer(self, question: str) -> RAGResponse:
         return RAGResponse(
-            answer_text=mock_answer_text,
-            mevzuat_ids=referenced_mevzuat_ids,
-            confidence_score=self.FIXED_CONFIDENCE,
-            response_time_ms=simulated_latency_ms,
+            answer_text=f'"{question}" sorunuz ilgili üniversite mevzuatı çerçevesinde değerlendirilmiştir.',
+            mevzuat_ids=[162, 163],
+            confidence_score=0.90,
+            response_time_ms=150,
         )
 
 
@@ -75,10 +169,9 @@ class ChatService:
     """Kullanıcı sorusunu RAG'a iletir ve soru-cevap çiftini tek işlemde kaydeder."""
 
     def __init__(self, rag_service: RAGServiceProtocol | None = None) -> None:
-        self._rag_service: RAGServiceProtocol = rag_service or MockRAGService()
+        self._rag_service: RAGServiceProtocol = rag_service or OllamaRAGService()
 
     def process_user_query(self, *, question_text: str, session_id: uuid.UUID) -> ChatResult:
-        # Yavaş LLM çağrısı transaction dışında yapılır; veritabanı kilitlenmez.
         try:
             rag_response = self._rag_service.generate_answer(question_text)
         except Exception as failure:

@@ -1,18 +1,13 @@
-// Bileşenlerin tek giriş noktası. VITE_DATA_MODE'a göre mock veya gerçek API uygulaması seçilir.
-// Koşul build sırasında sabitlenir; "api" derlemesine demo hesaplar ve mock veri girmez.
-const implementation =
-  import.meta.env.VITE_DATA_MODE === 'api' ? await import('./api') : await import('../mocks')
+import * as mockImpl from '../mocks'
+import * as apiImpl from './api'
 
-export const authService = implementation.authService
+export const authService = mockImpl.authService
+export const homeService = mockImpl.homeService
+export const statsService = apiImpl.statsApi
+export const documentsService = mockImpl.documentsService
+export const faqService = mockImpl.faqService
+export const announcementsService = mockImpl.announcementsService
+export const staffService = mockImpl.staffService
+export const adminService = mockImpl.adminService
 
-export const chatService = implementation.chatService
-export const homeService = implementation.homeService
-
-export const statsService = implementation.statsService
-export const documentsService = implementation.documentsService
-export const faqService = implementation.faqService
-export const announcementsService = implementation.announcementsService
-
-export const staffService = implementation.staffService
-
-export const adminService = implementation.adminService
+export const chatService = apiImpl.chatService

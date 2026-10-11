@@ -42,6 +42,7 @@ class MevzuatCitationSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     title = serializers.CharField()
     source_file = serializers.CharField(allow_blank=True, allow_null=True)
+    snippet = serializers.CharField(allow_blank=True, allow_null=True, required=False)
 
 
 class ChatQueryResponseSerializer(serializers.Serializer):
@@ -70,3 +71,4 @@ class AnalyticsDashboardSerializer(serializers.Serializer):
     avg_response_time_ms = serializers.FloatField()
     category_distribution = CategoryDistributionSerializer(many=True)
     status_breakdown = StatusBreakdownSerializer()
+
