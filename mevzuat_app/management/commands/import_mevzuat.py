@@ -5,50 +5,56 @@ import pdfplumber
 import docx
 from mevzuat_app.models import Kategori, Mevzuat, Kaynak
 
+
 class Command(BaseCommand):
-    help = 'PDF veya Word (DOCX) formatındaki mevzuat dosyalarını işler ve veritabanına aktarır.'
+    help = "PDF veya Word formatındaki mevzuat dosyalarını işler ve veritabanına aktarır."
 
     def add_arguments(self, parser):
-        parser.add_argument('--path', type=str, required=True, help='Dosya veya klasör yolu')
-        parser.add_argument('--category', type=str, required=True, help='Mevzuat kategorisi')
+        parser.add_argument("--path", type=str, required=True, help="Dosya veya klasör yolu")
+        parser.add_argument("--category", type=str, required=True, help="Mevzuat kategorisi")
+        parser.add_argument("--chunk-size", type=int, default=1200, help="Karakter bazlı parça boyutu")
+        parser.add_argument("--overlap", type=int, default=150, help="Parçalar arası örtüşme boyutu")
 
     def extract_text_from_pdf(self, file_path):
-        text = ""
+        pages_text = []
         with pdfplumber.open(file_path) as pdf:
-            for page in pdf.pages:
+            for page_num, page in enumerate(pdf.pages, start=1):
                 extracted = page.extract_text()
-                if extracted:
-                    text += extracted + "\n"
-        return text
+                if extracted and extracted.strip():
+                    pages_text.append((page_num, extracted.strip()))
+        return pages_text
 
     def extract_text_from_docx(self, file_path):
         doc = docx.Document(file_path)
-        full_text = []
-        for para in doc.paragraphs:
-            if para.text.strip():
-                full_text.append(para.text.strip())
-        return "\n".join(full_text)
+        full_text = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
+        combined = "\n".join(full_text)
+        return [(1, combined)] if combined else []
 
-    def chunk_text(self, text, chunk_size=1000, overlap=100):
+    def chunk_text(self, text, chunk_size=1200, overlap=150):
         chunks = []
         start = 0
-        while start < len(text):
-            end = start + chunk_size
-            chunks.append(text[start:end])
-            start += chunk_size - overlap
+        text_len = len(text)
+        while start < text_len:
+            end = min(start + chunk_size, text_len)
+            chunks.append(text[start:end].strip())
+            if end >= text_len:
+                break
+            start += max(chunk_size - overlap, 1)
         return chunks
 
     def handle(self, *args, **options):
-        path = options['path']
-        category_name = options['category']
+        path = options["path"]
+        category_name = options["category"]
+        chunk_size = options["chunk_size"]
+        overlap = options["overlap"]
 
         if not os.path.exists(path):
-            self.stdout.write(self.style.ERROR(f'Dosya veya yol bulunamadı: {path}'))
+            self.stdout.write(self.style.ERROR(f"Dosya veya yol bulunamadı: {path}"))
             return
 
         kategori, _ = Kategori.objects.get_or_create(
             name=category_name,
-            defaults={'slug': slugify(category_name)}
+            defaults={"slug": slugify(category_name)},
         )
 
         files_to_process = []
@@ -56,62 +62,46 @@ class Command(BaseCommand):
             files_to_process.append(path)
         elif os.path.isdir(path):
             for root, _, files in os.walk(path):
-                for file in files:
-                    if file.lower().endswith(('.pdf', '.docx')):
-                        files_to_process.append(os.path.join(root, file))
+                for f in files:
+                    if f.lower().endswith((".pdf", ".docx")):
+                        files_to_process.append(os.path.join(root, f))
 
-        # Kaynak modelinin alan adlarını dinamik olarak tespit edelim
-        kaynak_fields = [f.name for f in Kaynak._meta.get_fields()]
+        self.stdout.write(self.style.NOTICE(f"Toplam {len(files_to_process)} dosya işlenecek..."))
 
         for file_path in files_to_process:
             file_name = os.path.basename(file_path)
             doc_title, _ = os.path.splitext(file_name)
 
-            self.stdout.write(self.style.SUCCESS(f'İşleniyor: {file_name}'))
-
-            text = ""
             try:
-                if file_path.lower().endswith('.pdf'):
-                    text = self.extract_text_from_pdf(file_path)
-                elif file_path.lower().endswith('.docx'):
-                    text = self.extract_text_from_docx(file_path)
+                if file_path.lower().endswith(".pdf"):
+                    pages_data = self.extract_text_from_pdf(file_path)
+                else:
+                    pages_data = self.extract_text_from_docx(file_path)
             except Exception as e:
-                self.stdout.write(self.style.ERROR(f'{file_name} okunurken hata oluştu: {str(e)}'))
+                self.stdout.write(self.style.ERROR(f"{file_name} okunurken hata: {e}"))
                 continue
 
-            if not text.strip():
-                self.stdout.write(self.style.WARNING(f'{file_name} içeriği boş veya okunamadı.'))
+            if not pages_data:
+                self.stdout.write(self.style.WARNING(f"{file_name} içeriği boş veya taranmış görsel."))
                 continue
 
-            mevzuat, _ = Mevzuat.objects.get_or_create(
-                title=doc_title,
-                defaults={'category': kategori}
-            )
+            full_text = "\n\n".join([page_text for _, page_text in pages_data])
+            chunks = self.chunk_text(full_text, chunk_size=chunk_size, overlap=overlap)
 
-            chunks = self.chunk_text(text)
-            for idx, chunk in enumerate(chunks):
-                kaynak_kwargs = {'mevzuat': mevzuat}
-                
-                # Metin/İçerik alanı tespiti
-                if 'content' in kaynak_fields:
-                    kaynak_kwargs['content'] = chunk
-                elif 'icerik' in kaynak_fields:
-                    kaynak_kwargs['icerik'] = chunk
-                elif 'metin' in kaynak_fields:
-                    kaynak_kwargs['metin'] = chunk
-                elif 'text' in kaynak_fields:
-                    kaynak_kwargs['text'] = chunk
+            for idx, chunk in enumerate(chunks, start=1):
+                mevzuat = Mevzuat.objects.create(
+                    title=f"{doc_title} (Bölüm {idx})",
+                    content=chunk,
+                    chunk_index=idx,
+                    category=kategori,
+                    source_file=file_name,
+                )
 
-                # Sıra no / Index alanı tespiti
-                if 'chunk_index' in kaynak_fields:
-                    kaynak_kwargs['chunk_index'] = idx + 1
-                elif 'sira_no' in kaynak_fields:
-                    kaynak_kwargs['sira_no'] = idx + 1
-                elif 'order' in kaynak_fields:
-                    kaynak_kwargs['order'] = idx + 1
-                elif 'index' in kaynak_fields:
-                    kaynak_kwargs['index'] = idx + 1
+                approx_page = min(idx, len(pages_data))
+                Kaynak.objects.create(
+                    mevzuat=mevzuat,
+                    url_or_path=file_path,
+                    page_number=pages_data[approx_page - 1][0] if pages_data else 1,
+                )
 
-                Kaynak.objects.create(**kaynak_kwargs)
-
-            self.stdout.write(self.style.SUCCESS(f'Başarıyla aktarıldı: {doc_title} ({len(chunks)} parça)'))
+            self.stdout.write(self.style.SUCCESS(f"Aktarıldı: {file_name} -> {len(chunks)} parça oluşturuldu."))

@@ -4,7 +4,7 @@ import os
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-MODEL_NAME = "qwen3:4b-instruct-2507-q4_K_M"
+MODEL_NAME = "qwen2.5:3b"
 OLLAMA_BASE_URL = os.getenv(
     "OLLAMA_BASE_URL",
     "http://localhost:11434",
@@ -20,7 +20,7 @@ class OllamaClient:
         self,
         model_name=MODEL_NAME,
         base_url=OLLAMA_BASE_URL,
-        timeout=120,
+        timeout = 120,
     ):
         self.model_name = model_name
         self.base_url = base_url.rstrip("/")
