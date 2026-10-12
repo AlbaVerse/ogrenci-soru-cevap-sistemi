@@ -64,19 +64,18 @@ def get_analytics_dashboard_metrics() -> AnalyticsDashboardMetrics:
     category_counts = Counter()
     cevaplar = (
         Cevap.objects.select_related("question")
-        .prefetch_related("mevzuats__category")
+        .prefetch_related("referenced_mevzuats__category")
         .all()
     )
 
     counted_question_ids = set()
     for cevap in cevaplar:
-        q_id = getattr(cevap, "question_id", None) or getattr(cevap, "soru_id", None)
-        if q_id and q_id in counted_question_ids:
+        q_id = cevap.question_id
+        if q_id in counted_question_ids:
             continue
-        if q_id:
-            counted_question_ids.add(q_id)
+        counted_question_ids.add(q_id)
 
-        first_mevzuat = cevap.mevzuats.first()
+        first_mevzuat = cevap.referenced_mevzuats.first()
         if first_mevzuat and first_mevzuat.category:
             cat_name = first_mevzuat.category.name
         else:

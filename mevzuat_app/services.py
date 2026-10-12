@@ -218,12 +218,12 @@ class ChatService:
                 )
                 cevap = Cevap.objects.create(
                     soru=soru,
-                    text=rag_output.answer,
+                    answer_text=rag_output.answer,
                     confidence_score=rag_output.confidence_score,
                     response_time_ms=rag_output.response_time_ms,
                 )
                 if rag_output.mevzuat_ids:
-                    cevap.mevzuats.set(rag_output.mevzuat_ids)
+                    cevap.referenced_mevzuats.set(rag_output.mevzuat_ids)
         except DatabaseError as exc:
             logger.exception("Veritabani yazma hatasi: %s", exc)
             raise ChatPersistenceError("Soru ve cevap veritabanina kaydedilemedi.") from exc
