@@ -78,7 +78,7 @@ class RAGResponse:
 
 class OllamaClient:
     def __init__(self, api_key: str | None = None) -> None:
-        key = api_key or getattr(settings, "GROQ_API_KEY", "")
+        key = api_key or getattr(settings, "GROQ_API_KEY", "") or os.getenv("GROQ_API_KEY", "")
         self.client = Groq(api_key=key)
 
     def generate(self, model: str, system_prompt: str, user_prompt: str) -> str:
@@ -172,7 +172,7 @@ class OllamaRAGService:
             )
             confidence = 0.95
         except Exception as e:
-            logger.error("LLM uretim hatasi: %s", e)
+            logger.exception("LLM uretim hatasi: %s (key_var_mi: %s)", e, bool(getattr(settings, "GROQ_API_KEY", "") or os.getenv("GROQ_API_KEY")))
             answer = "Sorunuz yanıtlanırken bir hata oluştu. Lütfen tekrar deneyiniz."
             confidence = 0.0
 
