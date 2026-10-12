@@ -1,22 +1,16 @@
-﻿import logging
+﻿from collections import Counter
 from collections.abc import Sequence
 from typing import TypedDict
-import uuid
 
-from django.db import models
-from django.db.models import Avg, Count, Q
+from django.db.models import Avg
 
 from mevzuat_app.models import Cevap, Mevzuat, Soru
-
-logger = logging.getLogger(__name__)
-
-SOLVED_CONFIDENCE_THRESHOLD = 0.5
 
 
 class MevzuatCitation(TypedDict):
     id: int
     title: str
-    source_file: str
+    source_file: str | None
     snippet: str
 
 
@@ -46,44 +40,62 @@ def get_mevzuat_citations(*, mevzuat_ids: Sequence[int]) -> list[MevzuatCitation
     return list(
         Mevzuat.objects.filter(id__in=mevzuat_ids)
         .order_by("id")
-        .values("id", "title", "source_file", snippet=models.F("content"))
+        .values("id", "title", "source_file", "snippet")
     )
 
 
 def get_analytics_dashboard_metrics() -> AnalyticsDashboardMetrics:
-    """Dashboard metriklerini tamamen veritabani motoruna hesaplatir."""
-    solved_condition = Q(cevap__confidence_score__gte=SOLVED_CONFIDENCE_THRESHOLD)
-    unsolved_condition = Q(cevap__isnull=True) | Q(
-        cevap__confidence_score__lt=SOLVED_CONFIDENCE_THRESHOLD
+    total_q = Soru.objects.count()
+
+    solved_q = Cevap.objects.filter(confidence_score__gte=0.7).count()
+    unsolved_q = total_q - solved_q
+    if unsolved_q < 0:
+        unsolved_q = 0
+
+    avg_time_val = Cevap.objects.aggregate(avg=Avg("response_time_ms"))["avg"]
+    avg_time = round(float(avg_time_val), 2) if avg_time_val is not None else 0.0
+
+    if total_q > 0:
+        solved_pct = round((solved_q / total_q) * 100, 2)
+        unsolved_pct = round((unsolved_q / total_q) * 100, 2)
+    else:
+        solved_pct = 0.0
+        unsolved_pct = 0.0
+
+    # Soru bazli kategori dagilimi:
+    # Her sorunun cevabindaki mevzuatlardan ILK (oncelikli) olanin kategorisini alir.
+    category_counts = Counter()
+    cevaplar = (
+        Cevap.objects.select_related("soru")
+        .prefetch_related("mevzuats__category")
+        .all()
     )
 
-    aggregations = Soru.objects.aggregate(
-        total_questions=Count("id"),
-        solved_count=Count("id", filter=solved_condition),
-        unsolved_count=Count("id", filter=unsolved_condition),
-        avg_response_time_ms=Avg("cevap__response_time_ms"),
-    )
+    counted_soru_ids = set()
+    for cevap in cevaplar:
+        soru_id = cevap.soru_id
+        if soru_id in counted_soru_ids:
+            continue
+        counted_soru_ids.add(soru_id)
 
-    total_q = int(aggregations.get("total_questions") or 0)
-    solved_q = int(aggregations.get("solved_count") or 0)
-    unsolved_q = int(aggregations.get("unsolved_count") or 0)
-    avg_time = float(aggregations.get("avg_response_time_ms") or 0.0)
+        first_mevzuat = cevap.mevzuats.first()
+        if first_mevzuat and first_mevzuat.category:
+            cat_name = first_mevzuat.category.name
+        else:
+            cat_name = "Genel / Belirtilmemiş"
+        category_counts[cat_name] += 1
 
-    solved_pct = round((solved_q / total_q) * 100, 2) if total_q > 0 else 0.0
-    unsolved_pct = round((unsolved_q / total_q) * 100, 2) if total_q > 0 else 0.0
-
-    category_counts = (
-        Mevzuat.objects.values("category__name")
-        .annotate(question_count=Count("id"))
-        .order_by("-question_count")
-    )
+    # Cevaplanmamis veya iliskilendirilmemis kalan sorular varsa
+    unlinked_soru_count = total_q - len(counted_soru_ids)
+    if unlinked_soru_count > 0:
+        category_counts["Genel / Belirtilmemiş"] += unlinked_soru_count
 
     distribution: list[CategoryDistributionEntry] = [
         {
-            "category_name": entry["category__name"] or "Belirtilmemis",
-            "question_count": entry["question_count"],
+            "category_name": cat_name,
+            "question_count": count,
         }
-        for entry in category_counts
+        for cat_name, count in category_counts.most_common()
     ]
 
     return {
