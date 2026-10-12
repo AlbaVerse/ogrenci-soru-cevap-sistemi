@@ -36,11 +36,24 @@ class AnalyticsDashboardMetrics(TypedDict):
 def get_mevzuat_citations(*, mevzuat_ids: Sequence[int]) -> list[MevzuatCitation]:
     if not mevzuat_ids:
         return []
-    return list(
+    
+    mevzuats = (
         Mevzuat.objects.filter(id__in=mevzuat_ids)
         .order_by("id")
-        .values("id", "title", "source_file", "snippet")
+        .values("id", "title", "source_file", "content")
     )
+    
+    citations: list[MevzuatCitation] = []
+    for m in mevzuats:
+        content_text = m.get("content") or ""
+        snippet_text = content_text[:200] + ("..." if len(content_text) > 200 else "")
+        citations.append({
+            "id": m["id"],
+            "title": m["title"],
+            "source_file": m["source_file"],
+            "snippet": snippet_text,
+        })
+    return citations
 
 
 def get_analytics_dashboard_metrics() -> AnalyticsDashboardMetrics:

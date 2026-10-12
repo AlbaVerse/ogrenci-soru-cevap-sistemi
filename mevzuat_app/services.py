@@ -40,7 +40,6 @@ def clean_turkish(text: str) -> str:
 
 
 def extract_relevant_window(text: str, keywords: list[str], max_len: int = 3000) -> str:
-    """Metin icinde anahtar kelimelerin en yogun oldugu bolumu yakalar."""
     if not text or len(text) <= max_len:
         return text.strip()
 
@@ -201,7 +200,7 @@ class ChatService:
     def __init__(self, rag_service: OllamaRAGService | None = None) -> None:
         self.rag_service = rag_service or OllamaRAGService()
 
-    def process_and_persist_interaction(
+    def process_user_query(
         self,
         *,
         question_text: str,
@@ -214,10 +213,10 @@ class ChatService:
             with transaction.atomic():
                 soru = Soru.objects.create(
                     session_id=active_session,
-                    text=question_text,
+                    query_text=question_text,
                 )
                 cevap = Cevap.objects.create(
-                    soru=soru,
+                    question=soru,
                     answer_text=rag_output.answer,
                     confidence_score=rag_output.confidence_score,
                     response_time_ms=rag_output.response_time_ms,
@@ -238,3 +237,6 @@ class ChatService:
             sources=sources,
             response_time_ms=rag_output.response_time_ms,
         )
+
+    # Geriye donuk uyumluluk icin takma ad (alias)
+    process_and_persist_interaction = process_user_query
