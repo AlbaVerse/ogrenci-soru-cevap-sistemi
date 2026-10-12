@@ -3,14 +3,29 @@ import re
 import time
 from dataclasses import dataclass
 from typing import Any
+import uuid
 
 from django.conf import settings
+from django.db import DatabaseError, transaction
 from django.db.models import Q
 from groq import Groq
 
-from mevzuat_app.models import Mevzuat
+from mevzuat_app.models import Cevap, Mevzuat, Soru
+from mevzuat_app.selectors import get_mevzuat_citations
 
 logger = logging.getLogger(__name__)
+
+
+class ServiceError(Exception):
+    """Mevzuat servisleri icin temel hata sinifi."""
+
+
+class RAGServiceError(ServiceError):
+    """RAG pipeline veya LLM uretimi basarisiz oldugunda firlatilir."""
+
+
+class ChatPersistenceError(ServiceError):
+    """Soru/Cevap oturumu veritabanina kaydedilemediginde firlatilir."""
 
 
 def clean_turkish(text: str) -> str:
@@ -25,7 +40,7 @@ def clean_turkish(text: str) -> str:
 
 
 def extract_relevant_window(text: str, keywords: list[str], max_len: int = 3000) -> str:
-    """Metin icinde anahtar kelimelerin en yogun oldugu bolumu bulur."""
+    """Metin icinde anahtar kelimelerin en yogun oldugu bolumu yakalar."""
     if not text or len(text) <= max_len:
         return text.strip()
 
@@ -54,11 +69,11 @@ def extract_relevant_window(text: str, keywords: list[str], max_len: int = 3000)
     return f"{prefix}{extracted}{suffix}"
 
 
-@dataclass
+@dataclass(frozen=True)
 class RAGResponse:
     answer: str
     confidence_score: float
-    sources: list[dict[str, Any]]
+    mevzuat_ids: list[int]
     response_time_ms: int
 
 
@@ -164,18 +179,62 @@ class OllamaRAGService:
 
         response_time = int((time.perf_counter() - start_time) * 1000)
 
-        sources = []
-        for m in relevant_mevzuats:
-            sources.append({
-                "id": m.id,
-                "title": m.title,
-                "source_file": m.source_file,
-                "snippet": extract_relevant_window(m.content or "", keywords, max_len=300)[:300],
-            })
-
         return RAGResponse(
             answer=answer,
             confidence_score=confidence,
-            sources=sources,
+            mevzuat_ids=mevzuat_ids,
             response_time_ms=response_time,
+        )
+
+
+@dataclass(frozen=True)
+class ChatInteractionResult:
+    question_id: int
+    session_id: uuid.UUID
+    answer: str
+    confidence_score: float
+    sources: list[dict[str, Any]]
+    response_time_ms: int
+
+
+class ChatService:
+    def __init__(self, rag_service: OllamaRAGService | None = None) -> None:
+        self.rag_service = rag_service or OllamaRAGService()
+
+    def process_and_persist_interaction(
+        self,
+        *,
+        question_text: str,
+        session_id: uuid.UUID | None = None,
+    ) -> ChatInteractionResult:
+        active_session = session_id or uuid.uuid4()
+        rag_output = self.rag_service.generate_answer(question_text)
+
+        try:
+            with transaction.atomic():
+                soru = Soru.objects.create(
+                    session_id=active_session,
+                    text=question_text,
+                )
+                cevap = Cevap.objects.create(
+                    soru=soru,
+                    text=rag_output.answer,
+                    confidence_score=rag_output.confidence_score,
+                    response_time_ms=rag_output.response_time_ms,
+                )
+                if rag_output.mevzuat_ids:
+                    cevap.mevzuats.set(rag_output.mevzuat_ids)
+        except DatabaseError as exc:
+            logger.exception("Veritabani yazma hatasi: %s", exc)
+            raise ChatPersistenceError("Soru ve cevap veritabanina kaydedilemedi.") from exc
+
+        sources = get_mevzuat_citations(mevzuat_ids=rag_output.mevzuat_ids)
+
+        return ChatInteractionResult(
+            question_id=soru.id,
+            session_id=active_session,
+            answer=rag_output.answer,
+            confidence_score=rag_output.confidence_score,
+            sources=sources,
+            response_time_ms=rag_output.response_time_ms,
         )
