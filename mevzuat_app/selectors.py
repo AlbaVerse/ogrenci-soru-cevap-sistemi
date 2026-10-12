@@ -64,10 +64,10 @@ def get_analytics_dashboard_metrics() -> AnalyticsDashboardMetrics:
         avg_response_time_ms=Avg("cevap__response_time_ms"),
     )
 
-    total_q = aggregations["total_questions"] or 0
-    solved_q = aggregations["solved_count"] or 0
-    unsolved_q = aggregations["unsolved_count"] or 0
-    avg_time = float(aggregations["avg_response_time_ms"] or 0.0)
+    total_q = int(aggregations.get("total_questions") or 0)
+    solved_q = int(aggregations.get("solved_count") or 0)
+    unsolved_q = int(aggregations.get("unsolved_count") or 0)
+    avg_time = float(aggregations.get("avg_response_time_ms") or 0.0)
 
     solved_pct = round((solved_q / total_q) * 100, 2) if total_q > 0 else 0.0
     unsolved_pct = round((unsolved_q / total_q) * 100, 2) if total_q > 0 else 0.0
