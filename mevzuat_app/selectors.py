@@ -1,18 +1,22 @@
-﻿from __future__ import annotations
+﻿import logging
+from collections.abc import Sequence
+from typing import TypedDict
+import uuid
 
-from typing import Sequence, TypedDict
 from django.db import models
-from django.db.models import Count, Q
+from django.db.models import Avg, Count, Q
 
 from mevzuat_app.models import Cevap, Mevzuat, Soru
 
-SOLVED_CONFIDENCE_THRESHOLD = 0.65
+logger = logging.getLogger(__name__)
+
+SOLVED_CONFIDENCE_THRESHOLD = 0.5
 
 
 class MevzuatCitation(TypedDict):
     id: int
     title: str
-    source_file: str | None
+    source_file: str
     snippet: str
 
 
@@ -21,11 +25,18 @@ class CategoryDistributionEntry(TypedDict):
     question_count: int
 
 
+class StatusBreakdownEntry(TypedDict):
+    solved_percentage: float
+    unsolved_percentage: float
+
+
 class AnalyticsDashboardMetrics(TypedDict):
     total_questions: int
     solved_count: int
     unsolved_count: int
+    avg_response_time_ms: float
     category_distribution: list[CategoryDistributionEntry]
+    status_breakdown: StatusBreakdownEntry
 
 
 def get_mevzuat_citations(*, mevzuat_ids: Sequence[int]) -> list[MevzuatCitation]:
@@ -50,7 +61,16 @@ def get_analytics_dashboard_metrics() -> AnalyticsDashboardMetrics:
         total_questions=Count("id"),
         solved_count=Count("id", filter=solved_condition),
         unsolved_count=Count("id", filter=unsolved_condition),
+        avg_response_time_ms=Avg("cevap__response_time_ms"),
     )
+
+    total_q = aggregations["total_questions"] or 0
+    solved_q = aggregations["solved_count"] or 0
+    unsolved_q = aggregations["unsolved_count"] or 0
+    avg_time = float(aggregations["avg_response_time_ms"] or 0.0)
+
+    solved_pct = round((solved_q / total_q) * 100, 2) if total_q > 0 else 0.0
+    unsolved_pct = round((unsolved_q / total_q) * 100, 2) if total_q > 0 else 0.0
 
     category_counts = (
         Mevzuat.objects.values("category__name")
@@ -67,9 +87,13 @@ def get_analytics_dashboard_metrics() -> AnalyticsDashboardMetrics:
     ]
 
     return {
-        "total_questions": aggregations["total_questions"] or 0,
-        "solved_count": aggregations["solved_count"] or 0,
-        "unsolved_count": aggregations["unsolved_count"] or 0,
+        "total_questions": total_q,
+        "solved_count": solved_q,
+        "unsolved_count": unsolved_q,
+        "avg_response_time_ms": avg_time,
         "category_distribution": distribution,
+        "status_breakdown": {
+            "solved_percentage": solved_pct,
+            "unsolved_percentage": unsolved_pct,
+        },
     }
-
