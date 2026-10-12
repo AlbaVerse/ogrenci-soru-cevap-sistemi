@@ -34,7 +34,6 @@ class AnalyticsDashboardMetrics(TypedDict):
 
 
 def get_mevzuat_citations(*, mevzuat_ids: Sequence[int]) -> list[MevzuatCitation]:
-    """Verilen ID lerden yalnizca veritabaninda gercekten var olanlari atif olarak getirir."""
     if not mevzuat_ids:
         return []
     return list(
@@ -62,21 +61,20 @@ def get_analytics_dashboard_metrics() -> AnalyticsDashboardMetrics:
         solved_pct = 0.0
         unsolved_pct = 0.0
 
-    # Soru bazli kategori dagilimi:
-    # Her sorunun cevabindaki mevzuatlardan ILK (oncelikli) olanin kategorisini alir.
     category_counts = Counter()
     cevaplar = (
-        Cevap.objects.select_related("soru")
+        Cevap.objects.select_related("question")
         .prefetch_related("mevzuats__category")
         .all()
     )
 
-    counted_soru_ids = set()
+    counted_question_ids = set()
     for cevap in cevaplar:
-        soru_id = cevap.soru_id
-        if soru_id in counted_soru_ids:
+        q_id = getattr(cevap, "question_id", None) or getattr(cevap, "soru_id", None)
+        if q_id and q_id in counted_question_ids:
             continue
-        counted_soru_ids.add(soru_id)
+        if q_id:
+            counted_question_ids.add(q_id)
 
         first_mevzuat = cevap.mevzuats.first()
         if first_mevzuat and first_mevzuat.category:
@@ -85,10 +83,9 @@ def get_analytics_dashboard_metrics() -> AnalyticsDashboardMetrics:
             cat_name = "Genel / Belirtilmemiş"
         category_counts[cat_name] += 1
 
-    # Cevaplanmamis veya iliskilendirilmemis kalan sorular varsa
-    unlinked_soru_count = total_q - len(counted_soru_ids)
-    if unlinked_soru_count > 0:
-        category_counts["Genel / Belirtilmemiş"] += unlinked_soru_count
+    unlinked_count = total_q - len(counted_question_ids)
+    if unlinked_count > 0:
+        category_counts["Genel / Belirtilmemiş"] += unlinked_count
 
     distribution: list[CategoryDistributionEntry] = [
         {
