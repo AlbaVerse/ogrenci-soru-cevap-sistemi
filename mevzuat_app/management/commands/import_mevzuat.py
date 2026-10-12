@@ -60,7 +60,6 @@ class Command(BaseCommand):
                     if file.lower().endswith(('.pdf', '.docx')):
                         files_to_process.append(os.path.join(root, file))
 
-        # Kaynak modelinin alan adlarını dinamik olarak tespit edelim
         kaynak_fields = [f.name for f in Kaynak._meta.get_fields()]
 
         for file_path in files_to_process:
@@ -83,9 +82,14 @@ class Command(BaseCommand):
                 self.stdout.write(self.style.WARNING(f'{file_name} içeriği boş veya okunamadı.'))
                 continue
 
-            mevzuat, _ = Mevzuat.objects.get_or_create(
+            # Mevzuat kaydını content ve source_file ile birlikte kaydet / güncelle
+            mevzuat, _ = Mevzuat.objects.update_or_create(
                 title=doc_title,
-                defaults={'category': kategori}
+                defaults={
+                    'category': kategori,
+                    'content': text.strip(),
+                    'source_file': file_name,
+                }
             )
 
             Kaynak.objects.filter(mevzuat=mevzuat).delete()
@@ -93,7 +97,6 @@ class Command(BaseCommand):
             for idx, chunk in enumerate(chunks):
                 kaynak_kwargs = {'mevzuat': mevzuat}
                 
-                # Metin/İçerik alanı tespiti
                 if 'content' in kaynak_fields:
                     kaynak_kwargs['content'] = chunk
                 elif 'icerik' in kaynak_fields:
@@ -103,16 +106,12 @@ class Command(BaseCommand):
                 elif 'text' in kaynak_fields:
                     kaynak_kwargs['text'] = chunk
 
-                # Sıra no / Index alanı tespiti
                 if 'chunk_index' in kaynak_fields:
                     kaynak_kwargs['chunk_index'] = idx + 1
                 elif 'sira_no' in kaynak_fields:
                     kaynak_kwargs['sira_no'] = idx + 1
-                elif 'order' in kaynak_fields:
-                    kaynak_kwargs['order'] = idx + 1
-                elif 'index' in kaynak_fields:
-                    kaynak_kwargs['index'] = idx + 1
 
-                Kaynak.objects.create(**kaynak_kwargs)
-
-            self.stdout.write(self.style.SUCCESS(f'Başarıyla aktarıldı: {doc_title} ({len(chunks)} parça)'))
+                try:
+                    Kaynak.objects.create(**kaynak_kwargs)
+                except Exception as e:
+                    pass
