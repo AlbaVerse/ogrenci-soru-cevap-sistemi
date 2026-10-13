@@ -1,4 +1,5 @@
-﻿import logging
+﻿import os
+import logging
 import re
 import time
 from dataclasses import dataclass
@@ -166,7 +167,7 @@ class OllamaRAGService:
 
         try:
             answer = self.client.generate(
-                model=getattr(settings, "GROQ_MODEL", "llama-3.3-70b-versatile"),
+                model=os.getenv("GROQ_MODEL", getattr(settings, "GROQ_MODEL", "qwen/qwen3.8-27b")),
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
             )
@@ -240,3 +241,4 @@ class ChatService:
 
     # Geriye donuk uyumluluk icin takma ad (alias)
     process_and_persist_interaction = process_user_query
+
