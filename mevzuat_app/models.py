@@ -1,5 +1,6 @@
 import uuid
 from django.db import models
+from django.conf import settings
 
 
 class Kategori(models.Model):
@@ -63,6 +64,14 @@ class Soru(models.Model):
     session_id = models.UUIDField(default=uuid.uuid4, editable=False, verbose_name="Oturum ID")
     query_text = models.TextField(verbose_name="Soru Metni")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Sorma Tarihi")
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="sorular",
+        verbose_name="Kullanıcı",
+    )
 
     class Meta:
         db_table = "soru"
@@ -80,6 +89,17 @@ class Cevap(models.Model):
         on_delete=models.CASCADE, 
         related_name="cevap", 
         verbose_name="Soru"
+    )
+    class Status(models.TextChoices):
+        ANSWERED = "answered", "Yanıtlandı"
+        OUT_OF_SCOPE = "out_of_scope", "Kapsam dışı"
+        FAILED = "failed", "Hata"
+
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.ANSWERED,
+        db_index=True,
     )
     answer_text = models.TextField(verbose_name="Cevap Metni")
     confidence_score = models.FloatField(default=0.0, verbose_name="Güven Skoru")

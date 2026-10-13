@@ -28,6 +28,7 @@ def serve_mevzuat_file(request, filename):
 urlpatterns = [
     path("", home_view),
     path("admin/", admin.site.urls),
+    path("api/v1/auth/", include("accounts.urls")),
     path("api/v1/", include("mevzuat_app.urls")),
     path("media/<str:filename>/", serve_mevzuat_file, name="serve_mevzuat_file"),
     path("media/mevzuat/<str:filename>/", serve_mevzuat_file, name="serve_mevzuat_subfile"),

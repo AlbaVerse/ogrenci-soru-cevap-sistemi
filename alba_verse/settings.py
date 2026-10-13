@@ -1,4 +1,5 @@
 ﻿import os
+import dj_database_url
 """
 Django settings for alba_verse project.
 
@@ -26,7 +27,7 @@ SECRET_KEY = "django-insecure-dl(l2p+cib&b+m0*6b733r(%2$4f_f(3xz6p+yty3b9pv1zo^&
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv("DEBUG", "False").lower() in ("true", "1")
 
-ALLOWED_HOSTS = ["*"]
+ALLOWED_HOSTS = [h for h in os.getenv("ALLOWED_HOSTS", "*").split(",") if h]
 
 
 # Application definition
@@ -39,7 +40,9 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
+    "rest_framework.authtoken",
     "mevzuat_app",
+    "accounts",
     "corsheaders",
 ]
 
@@ -78,14 +81,18 @@ WSGI_APPLICATION = "alba_verse.wsgi.application"
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+database_url = os.getenv("DATABASE_URL")
+if database_url:
+    DATABASES = {
+        "default": dj_database_url.parse(database_url, conn_max_age=600)
     }
-}
-
-
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "db.sqlite3",
+        }
+    }
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
 
@@ -132,7 +139,26 @@ GROQ_MODEL = os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")
 
 import os
 
-# Groq API Configuration
+# Groq
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
+
+REST_FRAMEWORK = {
+    "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
+    "UNICODE_JSON": True,
+    "DEFAULT_AUTHENTICATION_CLASSES": ["rest_framework.authentication.TokenAuthentication"],
+    "DEFAULT_THROTTLE_RATES": {"auth": "20/min"},
+}
+
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "AlbaVerse <no-reply@localhost>")
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
+EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+ALLOWED_EMAIL_DOMAINS = [d for d in os.getenv("ALLOWED_EMAIL_DOMAINS", "").split(",") if d]
+
+CORS_ALLOW_ALL_ORIGINS = False
+CORS_ALLOWED_ORIGINS = [
+    o for o in os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",") if o
+]
+CSRF_TRUSTED_ORIGINS = [o for o in os.getenv("CSRF_TRUSTED_ORIGINS", "").split(",") if o]
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")

@@ -2,9 +2,11 @@
 from collections.abc import Sequence
 from typing import TypedDict
 
-from django.db.models import Avg
+from django.db.models import Avg, Count, Q
 
 from mevzuat_app.models import Cevap, Mevzuat, Soru
+
+UNCATEGORIZED_LABEL = "Genel / Belirtilmemiş"
 
 
 class MevzuatCitation(TypedDict):
@@ -36,13 +38,13 @@ class AnalyticsDashboardMetrics(TypedDict):
 def get_mevzuat_citations(*, mevzuat_ids: Sequence[int]) -> list[MevzuatCitation]:
     if not mevzuat_ids:
         return []
-    
+
     mevzuats = (
         Mevzuat.objects.filter(id__in=mevzuat_ids)
         .order_by("id")
         .values("id", "title", "source_file", "content")
     )
-    
+
     citations: list[MevzuatCitation] = []
     for m in mevzuats:
         content_text = m.get("content") or ""
@@ -56,66 +58,56 @@ def get_mevzuat_citations(*, mevzuat_ids: Sequence[int]) -> list[MevzuatCitation
     return citations
 
 
-def get_analytics_dashboard_metrics() -> AnalyticsDashboardMetrics:
-    total_q = Soru.objects.count()
+def compute_question_stats(cevaplar) -> AnalyticsDashboardMetrics:
+    """Tek kaynaktan tutarlı sayılar üreten istatistik çekirdeği."""
+    agg = cevaplar.aggregate(
+        solved=Count("id", filter=Q(status=Cevap.Status.ANSWERED)),
+        unsolved=Count("id", filter=~Q(status=Cevap.Status.ANSWERED)),
+        avg_ms=Avg("response_time_ms", filter=Q(status=Cevap.Status.ANSWERED)),
+    )
+    solved = agg["solved"] or 0
+    unsolved = agg["unsolved"] or 0
+    total = solved + unsolved
+    avg_ms = round(float(agg["avg_ms"] or 0.0), 2)
 
-    solved_q = Cevap.objects.filter(confidence_score__gte=0.7).count()
-    unsolved_q = total_q - solved_q
-    if unsolved_q < 0:
-        unsolved_q = 0
+    solved_pct = round((solved / total) * 100, 2) if total > 0 else 0.0
+    unsolved_pct = round((unsolved / total) * 100, 2) if total > 0 else 0.0
 
-    avg_time_val = Cevap.objects.aggregate(avg=Avg("response_time_ms"))["avg"]
-    avg_time = round(float(avg_time_val), 2) if avg_time_val is not None else 0.0
-
-    if total_q > 0:
-        solved_pct = round((solved_q / total_q) * 100, 2)
-        unsolved_pct = round((unsolved_q / total_q) * 100, 2)
-    else:
-        solved_pct = 0.0
-        unsolved_pct = 0.0
-
-    category_counts = Counter()
-    cevaplar = (
-        Cevap.objects.select_related("question")
+    distribution_counter: Counter = Counter()
+    answered_cevaplar = (
+        cevaplar.filter(status=Cevap.Status.ANSWERED)
         .prefetch_related("referenced_mevzuats__category")
-        .all()
     )
 
-    counted_question_ids = set()
-    for cevap in cevaplar:
-        q_id = cevap.question_id
-        if q_id in counted_question_ids:
-            continue
-        counted_question_ids.add(q_id)
+    for c in answered_cevaplar:
+        cats = [m.category.name for m in c.referenced_mevzuats.all() if m.category]
+        label = Counter(cats).most_common(1)[0][0] if cats else UNCATEGORIZED_LABEL
+        distribution_counter[label] += 1
 
-        referenced = list(cevap.referenced_mevzuats.all())
-        if referenced:
-            mevzuat_cats = [m.category.name for m in referenced if m.category]
-            cat_name = Counter(mevzuat_cats).most_common(1)[0][0] if mevzuat_cats else "Genel / Belirtilmemiş"
-        else:
-            cat_name = "Genel / Belirtilmemiş"
-        category_counts[cat_name] += 1
+    if unsolved > 0:
+        distribution_counter[UNCATEGORIZED_LABEL] += unsolved
 
-    unlinked_count = total_q - len(counted_question_ids)
-    if unlinked_count > 0:
-        category_counts["Genel / Belirtilmemiş"] += unlinked_count
-
-    distribution: list[CategoryDistributionEntry] = [
-        {
-            "category_name": cat_name,
-            "question_count": count,
-        }
-        for cat_name, count in category_counts.most_common()
+    distribution_list: list[CategoryDistributionEntry] = [
+        {"category_name": name, "question_count": count}
+        for name, count in distribution_counter.most_common()
     ]
 
     return {
-        "total_questions": total_q,
-        "solved_count": solved_q,
-        "unsolved_count": unsolved_q,
-        "avg_response_time_ms": avg_time,
-        "category_distribution": distribution,
+        "total_questions": total,
+        "solved_count": solved,
+        "unsolved_count": unsolved,
+        "avg_response_time_ms": avg_ms,
+        "category_distribution": distribution_list,
         "status_breakdown": {
             "solved_percentage": solved_pct,
             "unsolved_percentage": unsolved_pct,
         },
     }
+
+
+def get_analytics_dashboard_metrics() -> AnalyticsDashboardMetrics:
+    return compute_question_stats(Cevap.objects.all())
+
+
+def get_user_stats(user) -> AnalyticsDashboardMetrics:
+    return compute_question_stats(Cevap.objects.filter(question__user=user))
