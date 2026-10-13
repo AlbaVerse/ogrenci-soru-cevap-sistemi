@@ -1,4 +1,4 @@
-// Ortam değişkenleri tek yerden okunur. Bileşenler import.meta.env'e doğrudan bağlanmaz.
-export const DATA_MODE = import.meta.env.VITE_DATA_MODE === 'api' ? 'api' : 'mock'
-export const IS_MOCK = DATA_MODE === 'mock'
+// Canlı Render backend entegrasyonu için doğrudan 'api' moduna ayarlandı
+export const DATA_MODE = 'api'
+export const IS_MOCK = false
 export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '/api/v1').replace(/\/+$/, '')

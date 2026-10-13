@@ -1,4 +1,4 @@
-"""İnce view katmanı: istek al, servis/selector çağır, HTTP durumuyla dön."""
+"""Ä°nce view katmanÄ±: istek al, servis/selector Ã§aÄŸÄ±r, HTTP durumuyla dÃ¶n."""
 from __future__ import annotations
 
 import logging
@@ -25,6 +25,7 @@ authentication_classes = [OptionalTokenAuthentication]
 class ChatQueryView(APIView):
     """POST /api/v1/chat/query/"""
 
+    authentication_classes = [OptionalTokenAuthentication]
     permission_classes = [AllowAny]
     chat_service_class = ChatService
 
@@ -39,16 +40,22 @@ class ChatQueryView(APIView):
                 session_id=validated_query["session_id"],
                 user=request.user if request.user.is_authenticated else None,
             )
-        except RAGServiceError:
-            logger.exception("RAG servisi yanıt veremedi.")
+        except RAGServiceError as err:
+            logger.exception("RAG servisi yanıt veremedi: %s", err)
             return Response(
-                {"detail": "Yanıt servisi şu anda kullanılamıyor."},
+                {"detail": f"Yanıt servisi şu anda kullanılamıyor: {str(err)}"},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
-        except ChatPersistenceError:
-            logger.exception("Soru-cevap kaydı başarısız oldu.")
+        except ChatPersistenceError as err:
+            logger.exception("Soru-cevap kaydı başarısız oldu: %s", err)
             return Response(
                 {"detail": "Sorunuz kaydedilirken bir hata oluştu."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        except Exception as err:
+            logger.exception("Beklenmeyen sohbet hatası: %s", err)
+            return Response(
+                {"detail": f"Sunucu hatası: {str(err)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
@@ -56,8 +63,6 @@ class ChatQueryView(APIView):
             ChatQueryResponseSerializer(chat_result).data,
             status=status.HTTP_201_CREATED,
         )
-
-authentication_classes = [OptionalTokenAuthentication]
 class AnalyticsDashboardView(APIView):
     """GET /api/v1/analytics/dashboard/"""
 
