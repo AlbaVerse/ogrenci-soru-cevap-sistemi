@@ -151,6 +151,31 @@ Kurallar:
             return [], keywords, 0
 
         cleaned_q = clean_turkish(question)
+        cleaned_keywords = [clean_turkish(kw) for kw in keywords]
+
+        def score_chunk(chunk: Mevzuat) -> int:
+            content_lower = clean_turkish(chunk.content or "")
+            title_lower = clean_turkish(chunk.title or "")
+            score = 0
+            if "mazeret" in cleaned_q and "mazeret" in content_lower:
+                score += 50
+            for i in range(len(cleaned_keywords) - 1):
+                if f"{cleaned_keywords[i]} {cleaned_keywords[i + 1]}" in content_lower:
+                    score += 35
+            for kw in cleaned_keywords:
+                if kw in title_lower:
+                    score += 25
+                score += content_lower.count(kw) * 4
+            return score
+
+        scored = [(score_chunk(c), c) for c in candidate_chunks]
+        # Herhangi bir puan alan veya sorgu filtresinden dönen ilk adayları al
+        scored = [(s, c) for s, c in scored if s > 0]
+        scored.sort(key=lambda item: item[0], reverse=True)
+        top = scored[:limit]
+        if not top:
+            return candidate_chunks[:limit], keywords, 10
+        return [c for _, c in top], keywords, top[0][0]
 
         def score_chunk(chunk: Mevzuat) -> int:
             content_lower = clean_turkish(chunk.content or "")
