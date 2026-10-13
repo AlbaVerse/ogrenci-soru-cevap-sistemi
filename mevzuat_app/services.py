@@ -103,13 +103,13 @@ class OllamaRAGService:
         stop_words = {
             "ve", "veya", "ile", "bir", "bu", "şu", "o", "ne", "nedir", "nelerdir",
             "nasıl", "için", "mı", "mi", "mu", "mü", "var", "yok", "hakkında", "şartları",
-            "neler", "hangi", "hangisi", "kaç", "bana", "göre"
+            "neler", "hangi", "hangisi", "kaç", "bana", "göre", "şart", "şartlar", "başvuru", "başvurusu", "başvuruları", "koşul", "koşulları", "kurallar", "kuralları", "genel", "hakkı"
         }
         cleaned = re.sub(r"[^\w\s]", " ", question)
         tokens = clean_turkish(cleaned).split()
         return [t for t in tokens if t not in stop_words and len(t) > 2]
 
-    def _retrieve_relevant_chunks(self, question: str, limit: int = 5) -> tuple[list[Mevzuat], list[str]]:
+    def _retrieve_relevant_chunks(self, question: str, limit: int = 8) -> tuple[list[Mevzuat], list[str]]:
         keywords = self._extract_keywords(question)
         if not keywords:
             return list(Mevzuat.objects.all()[:limit]), []
@@ -126,10 +126,17 @@ class OllamaRAGService:
             content_lower = clean_turkish(chunk.content or "")
             title_lower = clean_turkish(chunk.title or "")
             score = 0
+            cleaned_q = clean_turkish(question).lower()
+            if 'mazeret' in cleaned_q and 'mazeret' in content_lower:
+                score += 50
+            for i in range(len(keywords) - 1):
+                phrase = f'{keywords[i]} {keywords[i+1]}'
+                if phrase in content_lower:
+                    score += 35
             for kw in keywords:
                 if kw in title_lower:
-                    score += 15
-                score += content_lower.count(kw) * 2
+                    score += 20
+                score += content_lower.count(kw) * 3
             return score
 
         candidate_chunks.sort(key=score_chunk, reverse=True)
@@ -138,7 +145,7 @@ class OllamaRAGService:
     def generate_answer(self, question: str) -> RAGResponse:
         start_time = time.perf_counter()
 
-        relevant_mevzuats, keywords = self._retrieve_relevant_chunks(question, limit=5)
+        relevant_mevzuats, keywords = self._retrieve_relevant_chunks(question, limit=8)
         mevzuat_ids = [m.id for m in relevant_mevzuats]
 
         context_texts = []
@@ -241,4 +248,5 @@ class ChatService:
 
     # Geriye donuk uyumluluk icin takma ad (alias)
     process_and_persist_interaction = process_user_query
+
 
