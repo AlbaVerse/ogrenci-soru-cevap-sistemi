@@ -1,4 +1,4 @@
-﻿"""Chat ve analitik uç noktalarının giriş/çıkış sözleşmeleri."""
+"""Chat ve analitik uç noktalarının giriş/çıkış sözleşmeleri."""
 from __future__ import annotations
 
 import uuid
@@ -46,12 +46,18 @@ class MevzuatCitationSerializer(serializers.Serializer):
 
 
 class ChatQueryResponseSerializer(serializers.Serializer):
-    question_id = serializers.IntegerField()
-    session_id = serializers.UUIDField()
-    answer = serializers.CharField()
-    confidence_score = serializers.FloatField()
-    sources = MevzuatCitationSerializer(many=True)
-    response_time_ms = serializers.IntegerField()
+    question_id = serializers.IntegerField(source="question.id")
+    session_id = serializers.UUIDField(source="question.session_id")
+    answer = serializers.CharField(source="rag_response.answer")
+    confidence_score = serializers.FloatField(source="rag_response.confidence_score")
+    sources = serializers.SerializerMethodField()
+    response_time_ms = serializers.IntegerField(source="rag_response.response_time_ms")
+
+    def get_sources(self, obj):
+        try:
+            return MevzuatCitationSerializer(obj.answer.kaynak_mevzuatlar.all(), many=True).data
+        except Exception:
+            return []
 
 
 class CategoryDistributionSerializer(serializers.Serializer):
