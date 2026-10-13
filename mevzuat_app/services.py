@@ -202,7 +202,7 @@ class OllamaRAGService:
         context_texts = []
         for m in relevant_mevzuats:
             doc_title = m.title or (m.category.name if m.category else "Mevzuat")
-            snippet = extract_relevant_window(m.content or "", keywords, max_len=3000)
+            snippet = (m.content or "").strip()
             context_texts.append(f"[KAYNAK: {doc_title} - Dosya: {m.source_file or 'Bilinmiyor'}]\n{snippet}")
 
         joined_contexts = "\n\n".join(context_texts)
