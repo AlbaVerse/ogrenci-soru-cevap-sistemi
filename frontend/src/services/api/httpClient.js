@@ -3,13 +3,29 @@ import { AppError, appErrorFromResponse } from '@/services/adapters/AppError'
 
 const UNSAFE_METHODS = ['POST', 'PUT', 'PATCH', 'DELETE']
 
-/** Korumalı bir istek 401 alırsa AuthProvider'ın oturumu düşürüp kullanıcıyı bilgilendirmesi için yayınlanır. */
 export const UNAUTHORIZED_EVENT = 'albaverse:unauthorized'
+export const AUTH_TOKEN_KEY = 'albaverse_auth_token'
 
-/**
- * Django varsayılanı: CSRF token'ı "csrftoken" çerezinden okunup X-CSRFToken başlığıyla gönderilir.
- * Yöntem backend ile netleşince yalnızca bu fonksiyon değişir.
- */
+export function getAuthToken() {
+  try {
+    return localStorage.getItem(AUTH_TOKEN_KEY)
+  } catch {
+    return null
+  }
+}
+
+export function setAuthToken(token) {
+  try {
+    if (token) {
+      localStorage.setItem(AUTH_TOKEN_KEY, token)
+    } else {
+      localStorage.removeItem(AUTH_TOKEN_KEY)
+    }
+  } catch (err) {
+    console.error('Token save error:', err)
+  }
+}
+
 export function getCsrfToken() {
   const match = document.cookie.split('; ').find((row) => row.startsWith('csrftoken='))
   return match ? decodeURIComponent(match.split('=')[1]) : null
@@ -28,18 +44,24 @@ function buildUrl(path, query) {
 
 export async function request(path, { method = 'GET', body, query, signal, expectUnauthorized = false } = {}) {
   const headers = { Accept: 'application/json' }
+  
+  const token = getAuthToken()
+  if (token) {
+    headers['Authorization'] = `Token ${token}`
+  }
+
   const init = { method, headers, credentials: 'include', signal }
 
   if (body instanceof FormData) {
-    init.body = body // multipart: Content-Type tarayıcı tarafından sınırla birlikte atanır
+    init.body = body
   } else if (body !== undefined) {
     headers['Content-Type'] = 'application/json'
     init.body = JSON.stringify(body)
   }
 
   if (UNSAFE_METHODS.includes(method)) {
-    const token = getCsrfToken()
-    if (token) headers['X-CSRFToken'] = token
+    const csrf = getCsrfToken()
+    if (csrf) headers['X-CSRFToken'] = csrf
   }
 
   let response
@@ -54,8 +76,10 @@ export async function request(path, { method = 'GET', body, query, signal, expec
   const data = response.status === 204 || !isJson ? null : await response.json().catch(() => null)
 
   if (!response.ok) {
-    // Giriş/oturum sorgusu gibi 401'in beklendiği isteklerde olay yayınlanmaz.
-    if (response.status === 401 && !expectUnauthorized) window.dispatchEvent(new Event(UNAUTHORIZED_EVENT))
+    if (response.status === 401 && !expectUnauthorized) {
+      setAuthToken(null)
+      window.dispatchEvent(new Event(UNAUTHORIZED_EVENT))
+    }
     throw appErrorFromResponse(response.status, data)
   }
   return data

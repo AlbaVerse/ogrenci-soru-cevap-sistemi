@@ -1,7 +1,7 @@
 import { AppError } from '@/services/adapters/AppError'
 import { mapUser } from '@/services/adapters/userMapper'
 import { ENDPOINTS } from './endpoints'
-import { http } from './httpClient'
+import { http, setAuthToken } from './httpClient'
 
 const invalidResponse = () =>
   new AppError({ status: 502, code: 'invalid_response', message: 'Sunucudan beklenmeyen bir yanıt alındı.' })
@@ -13,10 +13,6 @@ const requireUser = (data) => {
 }
 
 export const authApi = {
-  /**
-   * Oturum bilgisi. Giriş yoksa null döner.
-   * DRF SessionAuthentication girişsiz isteklere 403 de döndürebildiği için 401 ve 403 "oturum yok" sayılır.
-   */
   async getSession() {
     try {
       return requireUser(await http.get(ENDPOINTS.auth.me, { expectUnauthorized: true }))
@@ -26,15 +22,14 @@ export const authApi = {
     }
   },
 
-  /**
-   * Hata kodları (taslak): 401 invalid_credentials, 403 email_not_verified, 422 validation_error.
-   * Başarılı yanıt kullanıcı nesnesini döndürür.
-   */
   async login({ email, password }) {
-    return requireUser(await http.post(ENDPOINTS.auth.login, { email, password }, { expectUnauthorized: true }))
+    const res = await http.post(ENDPOINTS.auth.login, { email, password }, { expectUnauthorized: true })
+    if (res?.token) {
+      setAuthToken(res.token)
+    }
+    return requireUser(res)
   },
 
-  /** İstenen rol `requestedRole` (student | staff). Admin rolü istemciden istenemez. */
   async register({ firstName, lastName, email, password, requestedRole }) {
     await http.post(
       ENDPOINTS.auth.register,
@@ -43,10 +38,13 @@ export const authApi = {
     )
   },
 
-  /** Bağlantı doğrulaması: { token } — kod doğrulaması: { email, code }. */
   async verifyEmail({ token, email, code }) {
     const body = token ? { token } : { email, code }
-    await http.post(ENDPOINTS.auth.verifyEmail, body, { expectUnauthorized: true })
+    const res = await http.post(ENDPOINTS.auth.verifyEmail, body, { expectUnauthorized: true })
+    if (res?.token) {
+      setAuthToken(res.token)
+    }
+    return res
   },
 
   async resendVerification({ email }) {
@@ -57,7 +55,6 @@ export const authApi = {
     await http.post(ENDPOINTS.auth.passwordReset, { email }, { expectUnauthorized: true })
   },
 
-  /** `uid` Django varsayılan sıfırlama bağlantılarında bulunur; yoksa gönderilmez. */
   async confirmPasswordReset({ uid, token, password }) {
     await http.post(
       ENDPOINTS.auth.passwordResetConfirm,
@@ -67,7 +64,11 @@ export const authApi = {
   },
 
   async logout() {
-    await http.post(ENDPOINTS.auth.logout, undefined, { expectUnauthorized: true })
+    try {
+      await http.post(ENDPOINTS.auth.logout, undefined, { expectUnauthorized: true })
+    } finally {
+      setAuthToken(null)
+    }
   },
 
   async updateProfile({ firstName, lastName }) {

@@ -8,6 +8,7 @@ const rootDir = path.dirname(fileURLToPath(import.meta.url))
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, rootDir, '')
+  const target = env.VITE_DEV_PROXY_TARGET || 'https://albaverse-backend.onrender.com'
 
   return {
     plugins: [react(), tailwindcss()],
@@ -15,10 +16,13 @@ export default defineConfig(({ mode }) => {
       alias: { '@': path.resolve(rootDir, 'src') },
     },
     server: {
-      // Yalnızca VITE_DATA_MODE=api iken anlamlıdır. Django geliştirme sunucusuna yönlendirir.
       proxy: {
         '/api': {
-          target: env.VITE_DEV_PROXY_TARGET || 'http://127.0.0.1:8000',
+          target: target,
+          changeOrigin: true,
+        },
+        '/media': {
+          target: target,
           changeOrigin: true,
         },
       },
