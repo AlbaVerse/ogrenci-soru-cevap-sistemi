@@ -21,7 +21,7 @@ DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
 
 
 def get_groq_model() -> str:
-    return os.getenv("GROQ_MODEL") or getattr(settings, "GROQ_MODEL", "") or DEFAULT_GROQ_MODEL
+    return os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")
 
 
 class RAGServiceError(Exception):
