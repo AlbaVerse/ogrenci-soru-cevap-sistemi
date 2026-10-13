@@ -88,9 +88,10 @@ def get_analytics_dashboard_metrics() -> AnalyticsDashboardMetrics:
             continue
         counted_question_ids.add(q_id)
 
-        first_mevzuat = cevap.referenced_mevzuats.first()
-        if first_mevzuat and first_mevzuat.category:
-            cat_name = first_mevzuat.category.name
+        referenced = list(cevap.referenced_mevzuats.all())
+        if referenced:
+            mevzuat_cats = [m.category.name for m in referenced if m.category]
+            cat_name = Counter(mevzuat_cats).most_common(1)[0][0] if mevzuat_cats else "Genel / Belirtilmemiş"
         else:
             cat_name = "Genel / Belirtilmemiş"
         category_counts[cat_name] += 1

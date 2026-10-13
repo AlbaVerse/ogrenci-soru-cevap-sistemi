@@ -140,7 +140,10 @@ class OllamaRAGService:
             return score
 
         candidate_chunks.sort(key=score_chunk, reverse=True)
-        return candidate_chunks[:limit], keywords
+        # Sadece pozitif eslesen adaylari al (gurultuyu temizle)
+        positives = [c for c in candidate_chunks if score_chunk(c) > 0]
+        final_candidates = positives if positives else candidate_chunks[:2]
+        return final_candidates[:limit], keywords
 
     def generate_answer(self, question: str) -> RAGResponse:
         start_time = time.perf_counter()
