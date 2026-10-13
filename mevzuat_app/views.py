@@ -1,4 +1,4 @@
-"""Ä°nce view katmanÄ±: istek al, servis/selector Ã§aÄŸÄ±r, HTTP durumuyla dÃ¶n."""
+"""Ã„Â°nce view katmanÃ„Â±: istek al, servis/selector ÃƒÂ§aÃ„Å¸Ã„Â±r, HTTP durumuyla dÃƒÂ¶n."""
 from __future__ import annotations
 
 import logging
@@ -40,22 +40,22 @@ class ChatQueryView(APIView):
                 session_id=validated_query["session_id"],
                 user=request.user if request.user.is_authenticated else None,
             )
-        except RAGServiceError as err:
-            logger.exception("RAG servisi yanıt veremedi: %s", err)
+        except RAGServiceError:
+            logger.exception("RAG servisi yanıt veremedi.")
             return Response(
-                {"detail": f"Yanıt servisi şu anda kullanılamıyor: {str(err)}"},
+                {"detail": "Yanıt servisi şu anda kullanılamıyor."},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
-        except ChatPersistenceError as err:
-            logger.exception("Soru-cevap kaydı başarısız oldu: %s", err)
+        except ChatPersistenceError:
+            logger.exception("Soru-cevap kaydı başarısız oldu.")
             return Response(
                 {"detail": "Sorunuz kaydedilirken bir hata oluştu."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
-        except Exception as err:
-            logger.exception("Beklenmeyen sohbet hatası: %s", err)
+        except Exception:
+            logger.exception("chat/query beklenmeyen hata")
             return Response(
-                {"detail": f"Sunucu hatası: {str(err)}"},
+                {"detail": "Beklenmeyen bir hata oluştu."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
