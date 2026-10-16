@@ -104,7 +104,7 @@ class OllamaClient:
                     {"role": "user", "content": user_prompt},
                 ],
                 temperature=0.1,
-                max_tokens=1500,
+                max_tokens=750,
             )
         except RAGServiceError:
             raise
