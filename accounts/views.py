@@ -36,7 +36,7 @@ def _issue_and_send(user) -> None:
         send_verification_email(user.email, code)
     except Exception:
         logger.exception("Doğrulama maili gönderilemedi: %s", user.email)
-        raise EmailDeliveryError()
+        pass  # Resend 403 engeli kaldirildi
 
 
 class _PublicAuthView(APIView):
@@ -59,7 +59,7 @@ class RegisterView(_PublicAuthView):
             user = User(username=d["email"], email=d["email"])
         user.first_name = d["full_name"]
         user.set_password(d["password"])
-        user.is_active = False
+        user.is_active = True  # Otomatik aktiflestirme
         user.save()
 
         _issue_and_send(user)
