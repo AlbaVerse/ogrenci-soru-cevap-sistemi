@@ -15,7 +15,6 @@ from mevzuat_app.selectors import (
     get_user_stats,
 )
 from mevzuat_app.serializers import (
-    AnalyticsDashboardSerializer,
     ChatQueryRequestSerializer,
     ChatQueryResponseSerializer,
     ChatSessionSerializer,
@@ -65,7 +64,7 @@ class AnalyticsDashboardView(APIView):
     def get(self, request: Request) -> Response:
         start, end = _parse_range(request)
         summary = get_analytics_dashboard_metrics(start, end)
-        return Response(AnalyticsDashboardSerializer(summary).data, status=status.HTTP_200_OK)
+        return Response(summary, status=status.HTTP_200_OK)
 
 
 class MyStatsView(APIView):
@@ -75,7 +74,7 @@ class MyStatsView(APIView):
     def get(self, request: Request) -> Response:
         start, end = _parse_range(request)
         summary = get_user_stats(request.user, start, end)
-        return Response(AnalyticsDashboardSerializer(summary).data, status=status.HTTP_200_OK)
+        return Response(summary, status=status.HTTP_200_OK)
 
 
 class ChatSessionListView(APIView):
