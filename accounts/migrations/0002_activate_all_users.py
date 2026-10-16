@@ -3,7 +3,7 @@
 
 def activate_users(apps, schema_editor):
     User = apps.get_model("auth", "User")
-    User.objects.filter(is_active=False).update(is_active=True)
+    User.objects.all().update(is_active=True)
 
 
 class Migration(migrations.Migration):
