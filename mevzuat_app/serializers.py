@@ -1,5 +1,4 @@
-"""Chat ve analitik uç noktalarının giriş/çıkış sözleşmeleri."""
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import uuid
 from typing import Optional
@@ -10,24 +9,14 @@ MAX_QUESTION_LENGTH = 2000
 
 
 class ChatQueryRequestSerializer(serializers.Serializer):
-    """POST /api/v1/chat/query/ istek gövdesi için katı doğrulama."""
-
     question = serializers.CharField(
         max_length=MAX_QUESTION_LENGTH,
         allow_blank=False,
         trim_whitespace=True,
-        error_messages={
-            "blank": "Soru metni boş bırakılamaz.",
-            "required": "Soru metni zorunludur.",
-            "max_length": f"Soru en fazla {MAX_QUESTION_LENGTH} karakter olabilir.",
-        },
     )
     session_id = serializers.UUIDField(
         required=False,
         default=uuid.uuid4,
-        error_messages={
-            "invalid": "session_id geçerli bir UUID olmalıdır.",
-        },
     )
 
     def validate_session_id(self, session_identifier: Optional[uuid.UUID]) -> uuid.UUID:
@@ -66,15 +55,36 @@ class CategoryDistributionSerializer(serializers.Serializer):
 
 
 class StatusBreakdownSerializer(serializers.Serializer):
+    solved = serializers.IntegerField(required=False)
+    unsolved = serializers.IntegerField(required=False)
+    out_of_scope = serializers.IntegerField(required=False)
+    failed = serializers.IntegerField(required=False)
     solved_percentage = serializers.FloatField()
     unsolved_percentage = serializers.FloatField()
+
+
+class TimeSeriesPointSerializer(serializers.Serializer):
+    date = serializers.CharField()
+    total = serializers.IntegerField()
+    solved = serializers.IntegerField()
+    unsolved = serializers.IntegerField()
+
+
+class ChatSessionSerializer(serializers.Serializer):
+    session_id = serializers.UUIDField()
+    title = serializers.CharField()
+    started_at = serializers.DateTimeField()
+    last_activity = serializers.DateTimeField()
+    message_count = serializers.IntegerField()
 
 
 class AnalyticsDashboardSerializer(serializers.Serializer):
     total_questions = serializers.IntegerField()
     solved_count = serializers.IntegerField()
     unsolved_count = serializers.IntegerField()
-    avg_response_time_ms = serializers.FloatField()
+    answered_count = serializers.IntegerField(required=False)
+    unanswered_count = serializers.IntegerField(required=False)
+    avg_response_time_ms = serializers.FloatField(allow_null=True)
     category_distribution = CategoryDistributionSerializer(many=True)
     status_breakdown = StatusBreakdownSerializer()
-
+    time_series = TimeSeriesPointSerializer(many=True, required=False)
