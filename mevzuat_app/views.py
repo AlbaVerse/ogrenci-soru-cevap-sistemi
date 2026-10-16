@@ -2,7 +2,15 @@
 from __future__ import annotations
 
 import logging
+import os
 
+from django.conf import settings
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import AllowAny
+from rest_framework.request import Request
+from mevzuat_app.models import Mevzuat
+from mevzuat_app.services import OllamaRAGService, get_groq_model
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.request import Request
@@ -82,3 +90,32 @@ class MyStatsView(APIView):
 
     def get(self, request):
         return Response(get_user_stats(request.user), status=status.HTTP_200_OK)
+
+class RAGDebugView(APIView):
+    """GEÇİCİ: Render ortamını teşhis eder. Teşhis bitince SİLİN."""
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def get(self, request: Request) -> Response:
+        expected = os.getenv("DEBUG_TOKEN")
+        if not expected or request.headers.get("X-Debug-Token") != expected:
+            return Response({"detail": "yetkisiz"}, status=403)
+
+        q = request.query_params.get("q", "Kayıt dondurma şartları nelerdir?")
+        rag = OllamaRAGService()
+        chunks, keywords, top_score = rag._retrieve_relevant_chunks(q, limit=8)
+
+        db = settings.DATABASES["default"]
+        return Response({
+            "db_engine": db.get("ENGINE"),
+            "db_name": str(db.get("NAME")),
+            "db_host": db.get("HOST"),
+            "mevzuat_count": Mevzuat.objects.count(),
+            "groq_key_set": bool(os.getenv("GROQ_API_KEY") or getattr(settings, "GROQ_API_KEY", "")),
+            "groq_model": get_groq_model(),
+            "keywords": keywords,
+            "chunk_count": len(chunks),
+            "top_score": top_score,
+            "chunk_titles": [c.title for c in chunks],
+            "git_commit": os.getenv("RENDER_GIT_COMMIT"),
+        })    
