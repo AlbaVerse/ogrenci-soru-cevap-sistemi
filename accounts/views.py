@@ -79,7 +79,7 @@ class VerifyEmailView(_PublicAuthView):
         s.is_valid(raise_exception=True)
         email = s.validated_data["email"].strip().lower()
 
-        user = User.objects.filter(username=email).first()
+        user = User.objects.filter(username=email).first() or User.objects.filter(email=email).first()
         ev = getattr(user, "email_verification", None) if user else None
         if not ev or not ev.verify(s.validated_data["code"]):
             return Response({"detail": "Kod geçersiz veya süresi dolmuş."}, status=400)
@@ -108,7 +108,7 @@ class LoginView(_PublicAuthView):
         s.is_valid(raise_exception=True)
         email = s.validated_data["email"].strip().lower()
 
-        user = User.objects.filter(username=email).first()
+        user = User.objects.filter(username=email).first() or User.objects.filter(email=email).first()
         if not user or not user.check_password(s.validated_data["password"]):
             return Response({"detail": "E-posta veya şifre hatalı."}, status=400)
         if not user.is_active:

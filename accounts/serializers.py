@@ -44,8 +44,16 @@ class ResendCodeSerializer(serializers.Serializer):
 
 
 class LoginSerializer(serializers.Serializer):
-    email = serializers.EmailField(max_length=150)
+    email = serializers.CharField(max_length=150, required=False)
+    username = serializers.CharField(max_length=150, required=False)
     password = serializers.CharField(write_only=True)
+
+    def validate(self, attrs):
+        ident = attrs.get("email") or attrs.get("username")
+        if not ident:
+            raise serializers.ValidationError({"detail": "E-posta veya kullanıcı adı gereklidir."})
+        attrs["email"] = ident.strip().lower()
+        return attrs
 
 
 def user_payload(user) -> dict:
