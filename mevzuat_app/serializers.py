@@ -49,42 +49,33 @@ class ChatQueryResponseSerializer(serializers.Serializer):
             return []
 
 
-class CategoryDistributionSerializer(serializers.Serializer):
-    category_name = serializers.CharField()
-    question_count = serializers.IntegerField()
-
-
-class StatusBreakdownSerializer(serializers.Serializer):
-    solved = serializers.IntegerField(required=False)
-    unsolved = serializers.IntegerField(required=False)
-    out_of_scope = serializers.IntegerField(required=False)
-    failed = serializers.IntegerField(required=False)
-    solved_percentage = serializers.FloatField()
-    unsolved_percentage = serializers.FloatField()
-
-
-class TimeSeriesPointSerializer(serializers.Serializer):
-    date = serializers.CharField()
-    total = serializers.IntegerField()
-    solved = serializers.IntegerField()
-    unsolved = serializers.IntegerField()
-
-
 class ChatSessionSerializer(serializers.Serializer):
+    id = serializers.CharField()
     session_id = serializers.UUIDField()
     title = serializers.CharField()
-    started_at = serializers.DateTimeField()
-    last_activity = serializers.DateTimeField()
+    created_at = serializers.DateTimeField()
+    updated_at = serializers.DateTimeField()
     message_count = serializers.IntegerField()
 
 
 class AnalyticsDashboardSerializer(serializers.Serializer):
     total_questions = serializers.IntegerField()
+    totalQuestions = serializers.IntegerField(required=False)
     solved_count = serializers.IntegerField()
     unsolved_count = serializers.IntegerField()
     answered_count = serializers.IntegerField(required=False)
+    answeredCount = serializers.IntegerField(required=False)
     unanswered_count = serializers.IntegerField(required=False)
+    unansweredCount = serializers.IntegerField(required=False)
+    insufficient_count = serializers.IntegerField(required=False)
+    insufficientCount = serializers.IntegerField(required=False)
     avg_response_time_ms = serializers.FloatField(allow_null=True)
-    category_distribution = CategoryDistributionSerializer(many=True)
-    status_breakdown = StatusBreakdownSerializer()
-    time_series = TimeSeriesPointSerializer(many=True, required=False)
+    average_response_time_ms = serializers.FloatField(allow_null=True, required=False)
+    averageResponseTimeMs = serializers.FloatField(allow_null=True, required=False)
+    category_distribution = serializers.ListField(child=serializers.DictField(), required=False)
+    category_breakdown = serializers.ListField(child=serializers.DictField(), required=False)
+    categories = serializers.ListField(child=serializers.DictField(), required=False)
+    daily_trend = serializers.ListField(child=serializers.DictField(), required=False)
+    dailyTrend = serializers.ListField(child=serializers.DictField(), required=False)
+    time_series = serializers.ListField(child=serializers.DictField(), required=False)
+    status_breakdown = serializers.DictField(required=False)

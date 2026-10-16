@@ -3,7 +3,7 @@ from collections.abc import Sequence
 from datetime import timedelta
 from typing import TypedDict
 
-from django.db.models import Avg, Count, F, Max, Min, Q
+from django.db.models import Avg, Count, Max, Min, Q
 from django.db.models.functions import TruncDate
 from django.utils import timezone
 
@@ -21,17 +21,12 @@ class MevzuatCitation(TypedDict):
     snippet: str
 
 
-class CategoryDistributionEntry(TypedDict):
-    category_name: str
-    question_count: int
-
-
 def _pct(part: int, total: int) -> float:
     return round(part * 100 / total, 1) if total else 0.0
 
 
-def build_time_series(cevap_qs, start, end) -> list[dict]:
-    """[start, end] aralığındaki her gün için bir nokta döner (boş günler 0)."""
+def build_daily_trend(cevap_qs, start, end) -> list[dict]:
+    """[start, end] aralığındaki her gün için frontend uyumlu daily_trend döner."""
     rows = (
         cevap_qs.filter(created_at__date__gte=start, created_at__date__lte=end)
         .annotate(day=TruncDate("created_at"))
@@ -47,9 +42,11 @@ def build_time_series(cevap_qs, start, end) -> list[dict]:
     series, day = [], start
     while day <= end:
         r = by_day.get(day)
+        cnt = r["total"] if r else 0
         series.append({
             "date": day.isoformat(),
-            "total": r["total"] if r else 0,
+            "count": cnt,
+            "total": cnt,
             "solved": r["solved"] if r else 0,
             "unsolved": r["unsolved"] if r else 0,
         })
@@ -81,7 +78,6 @@ def compute_question_stats(cevap_qs, start=None, end=None) -> dict:
     unsolved = out_of_scope + failed
     avg_ms = round(float(agg["avg_ms"] or 0.0), 2) if agg["avg_ms"] is not None else 0.0
 
-    # Kategori dağılımını hesapla
     distribution_counter: Counter = Counter()
     answered_cevaplar = (
         scoped.filter(status=Cevap.Status.ANSWERED)
@@ -96,19 +92,34 @@ def compute_question_stats(cevap_qs, start=None, end=None) -> dict:
     if unsolved > 0:
         distribution_counter[UNCATEGORIZED_LABEL] += unsolved
 
-    distribution_list: list[CategoryDistributionEntry] = [
-        {"category_name": name, "question_count": count}
+    # Frontend'in beklediği hem categories/category_breakdown hem de eski format
+    category_list = [
+        {"name": name, "category": name, "count": count, "total": count, "category_name": name, "question_count": count}
         for name, count in distribution_counter.most_common()
     ]
 
+    trend = build_daily_trend(cevap_qs, start, end)
+
     return {
         "total_questions": total,
+        "totalQuestions": total,
         "solved_count": solved,
         "unsolved_count": unsolved,
         "answered_count": solved,
+        "answeredCount": solved,
         "unanswered_count": unsolved,
+        "unansweredCount": unsolved,
+        "insufficient_count": 0,
+        "insufficientCount": 0,
         "avg_response_time_ms": avg_ms,
-        "category_distribution": distribution_list,
+        "average_response_time_ms": avg_ms,
+        "averageResponseTimeMs": avg_ms,
+        "category_distribution": category_list,
+        "category_breakdown": category_list,
+        "categories": category_list,
+        "daily_trend": trend,
+        "dailyTrend": trend,
+        "time_series": trend,
         "status_breakdown": {
             "solved": solved,
             "unsolved": unsolved,
@@ -117,7 +128,6 @@ def compute_question_stats(cevap_qs, start=None, end=None) -> dict:
             "solved_percentage": _pct(solved, total),
             "unsolved_percentage": _pct(unsolved, total),
         },
-        "time_series": build_time_series(cevap_qs, start, end),
     }
 
 
@@ -132,7 +142,7 @@ def get_user_stats(user, start=None, end=None) -> dict:
 
 
 def get_user_chat_sessions(user, limit: int = 100) -> list[dict]:
-    """Kullanıcının oturumları; başlık ilk sorudan türetilir."""
+    """Kullanıcının oturumları; chatMapper.js ile tam uyumlu."""
     sessions = list(
         Soru.objects.filter(user=user)
         .values("session_id")
@@ -146,17 +156,29 @@ def get_user_chat_sessions(user, limit: int = 100) -> list[dict]:
     ids = [s["session_id"] for s in sessions]
 
     first_text: dict = {}
-    for sid, text in (
+    for sid, text_val in (
         Soru.objects.filter(user=user, session_id__in=ids)
         .order_by("created_at", "id")
         .values_list("session_id", "query_text")
     ):
-        first_text.setdefault(sid, text)
+        first_text.setdefault(sid, text_val)
 
+    result = []
     for s in sessions:
+        sid_str = str(s["session_id"])
         raw = " ".join((first_text.get(s["session_id"]) or "").split())
-        s["title"] = (raw[:57] + "…") if len(raw) > 60 else (raw or "Yeni sohbet")
-    return sessions
+        title_val = (raw[:57] + "…") if len(raw) > 60 else (raw or "Yeni sohbet")
+        result.append({
+            "id": sid_str,
+            "session_id": s["session_id"],
+            "title": title_val,
+            "created_at": s["started_at"],
+            "updated_at": s["last_activity"],
+            "started_at": s["started_at"],
+            "last_activity": s["last_activity"],
+            "message_count": s["message_count"],
+        })
+    return result
 
 
 def get_mevzuat_citations(*, mevzuat_ids: Sequence[int]) -> list[MevzuatCitation]:
