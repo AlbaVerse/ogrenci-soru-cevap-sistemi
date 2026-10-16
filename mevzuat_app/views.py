@@ -47,9 +47,9 @@ class ChatQueryView(APIView):
         serializer.is_valid(raise_exception=True)
 
         user = request.user if request.user.is_authenticated else None
-        result = ChatService.process_user_query(
+        result = ChatService().process_user_query(
             question_text=serializer.validated_data["question"],
-            session_id=serializer.validated_data["session_id"],
+            session_id=serializer.validated_data.get("session_id"),
             user=user,
         )
         return Response(
