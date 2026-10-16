@@ -97,10 +97,6 @@ class RAGDebugView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request: Request) -> Response:
-        expected = os.getenv("DEBUG_TOKEN")
-        if not expected or request.headers.get("X-Debug-Token") != expected:
-            return Response({"detail": "yetkisiz"}, status=403)
-
         q = request.query_params.get("q", "Kayıt dondurma şartları nelerdir?")
         rag = OllamaRAGService()
         chunks, keywords, top_score = rag._retrieve_relevant_chunks(q, limit=8)
