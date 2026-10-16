@@ -17,6 +17,7 @@ export const statsApi = {
         category: c.category_name,
         total: c.question_count,
       })),
+      daily_trend: raw.daily_trend || raw.time_series || [],
       is_demo: false,
     }
     return mapStats(adapted)
@@ -39,3 +40,4 @@ export const announcementsApi = {
   async getPublishedAnnouncements() { return mapAnnouncements(await http.get("/announcements/")) },
   async getAnnouncementById(id) { return mapAnnouncement(await http.get(ann(id))) },
 }
+
