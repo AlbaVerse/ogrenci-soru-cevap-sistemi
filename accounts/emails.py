@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 import requests
 from django.conf import settings
 from django.core.mail import send_mail
@@ -7,10 +7,10 @@ logger = logging.getLogger(__name__)
 
 
 def send_verification_email(to_email: str, code: str) -> None:
-    subject = "AlbaVerse e-posta doğrulama kodu"
+    subject = "AlbaVerse e-posta dogrulama kodu"
     text = (
-        f"AlbaVerse doğrulama kodunuz: {code}\n\n"
-        "Bu kod 10 dakika geçerlidir. Bu işlemi siz yapmadıysanız bu e-postayı yok sayın."
+        f"AlbaVerse dogrulama kodunuz: {code}\n\n"
+        "Bu kod 10 dakika gecerlidir. Bu islemi siz yapmadiysaniz bu e-postayi yok sayin."
     )
     api_key = getattr(settings, "RESEND_API_KEY", "")
     if api_key:
@@ -25,6 +25,10 @@ def send_verification_email(to_email: str, code: str) -> None:
             },
             timeout=10,
         )
+        if not resp.ok:
+            logger.error("Resend API hatasi [%s]: %s", resp.status_code, resp.text)
+            logger.warning("E-posta gonderilemedi! TEST MODU ICIN KOD: %s (Kullanici: %s)", code, to_email)
         resp.raise_for_status()
         return
+
     send_mail(subject, text, settings.DEFAULT_FROM_EMAIL, [to_email], fail_silently=False)
