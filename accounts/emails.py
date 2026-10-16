@@ -14,21 +14,26 @@ def send_verification_email(to_email: str, code: str) -> None:
     )
     api_key = getattr(settings, "RESEND_API_KEY", "")
     if api_key:
-        resp = requests.post(
-            "https://api.resend.com/emails",
-            headers={"Authorization": f"Bearer {api_key}"},
-            json={
-                "from": settings.DEFAULT_FROM_EMAIL,
-                "to": [to_email],
-                "subject": subject,
-                "text": text,
-            },
-            timeout=10,
-        )
-        if not resp.ok:
-            logger.error("Resend API hatasi [%s]: %s", resp.status_code, resp.text)
-            logger.warning("E-posta gonderilemedi! TEST MODU ICIN KOD: %s (Kullanici: %s)", code, to_email)
-        resp.raise_for_status()
-        return
+        try:
+            resp = requests.post(
+                "https://api.resend.com/emails",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={
+                    "from": settings.DEFAULT_FROM_EMAIL,
+                    "to": [to_email],
+                    "subject": subject,
+                    "text": text,
+                },
+                timeout=10,
+            )
+            if not resp.ok:
+                logger.error("Resend API hatasi [%s]: %s", resp.status_code, resp.text)
+                if getattr(settings, "DEBUG", False):
+                    logger.info("DEBUG: Test dogrulama kodu: %s", code)
+            resp.raise_for_status()
+            return
+        except Exception as exc:
+            logger.warning("E-posta servisi cagrılamadı (%s): %s", to_email, exc)
+            return
 
-    send_mail(subject, text, settings.DEFAULT_FROM_EMAIL, [to_email], fail_silently=False)
+    send_mail(subject, text, settings.DEFAULT_FROM_EMAIL, [to_email], fail_silently=True)

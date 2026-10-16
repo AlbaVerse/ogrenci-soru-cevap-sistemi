@@ -54,12 +54,16 @@ class RegisterView(_PublicAuthView):
 
         user = User.objects.filter(username=d["email"]).first()
         if user and user.is_active:
-            return Response({"email": ["Bu e-posta adresi zaten kayıtlı."]}, status=400)
+            # Test asamasinda sifreyi guncelleyip girise izin ver
+            user.set_password(d["password"])
+            user.first_name = d["full_name"]
+            user.save()
+            return Response({"detail": "Hesap guncellendi ve aktiflestirildi. Giris yapabilirsiniz.", "email": user.email}, status=status.HTTP_200_OK)
         if user is None:
             user = User(username=d["email"], email=d["email"])
         user.first_name = d["full_name"]
         user.set_password(d["password"])
-        user.is_active = True  # Otomatik aktiflestirme
+        user.is_active = True
         user.save()
 
         _issue_and_send(user)
