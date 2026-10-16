@@ -1,4 +1,4 @@
-﻿import { http } from "./httpClient"
+import { http } from "./httpClient"
 import { mapConversation, mapConversations, mapMessage } from "@/services/adapters/chatMapper"
 
 const STORAGE_KEY = "albaverse_chat_sessions"
@@ -25,7 +25,7 @@ export const chatApi = {
     const sessions = loadStorage()
     const list = Object.values(sessions).map((c) => ({
       id: c.id,
-      title: c.title || "Yeni sohbet",
+      title: (c.title && c.title !== "Yeni sohbet") ? c.title : ((c.messages || []).find((m) => m.role === "user")?.content?.slice(0, 35) || c.title || "Yeni sohbet"),
       created_at: c.created_at,
       updated_at: c.updated_at,
       message_count: Array.isArray(c.messages) ? c.messages.length : 0,
@@ -123,6 +123,9 @@ export const chatApi = {
         updated_at: now,
         messages: [],
       }
+    }
+    if (!conv.title || conv.title === "Yeni sohbet") {
+      conv.title = content.trim().length > 35 ? content.trim().slice(0, 35) + "..." : content.trim()
     }
     conv.messages.push(userMsgRaw, assistantMsgRaw)
     conv.updated_at = now
