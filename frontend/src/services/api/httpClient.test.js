@@ -20,7 +20,7 @@ describe('httpClient', () => {
     await http.get('/auth/me/')
     const [url, init] = fetchMock.mock.calls[0]
     expect(url).toBe('/api/v1/auth/me/')
-    expect(init.credentials).toBe('include')
+    expect(init.credentials).toBe('same-origin')
   })
 
   it('güvenli olmayan isteklere CSRF başlığı ekler, GET isteğine eklemez', async () => {

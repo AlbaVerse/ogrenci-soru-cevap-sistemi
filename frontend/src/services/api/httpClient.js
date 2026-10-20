@@ -50,7 +50,7 @@ export async function request(path, { method = 'GET', body, query, signal, expec
     headers['Authorization'] = `Token ${token}`
   }
 
-  const init = { method, headers, credentials: 'include', signal }
+  const init = { method, headers, credentials: 'same-origin', signal }
 
   if (body instanceof FormData) {
     init.body = body
