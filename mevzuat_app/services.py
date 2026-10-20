@@ -21,7 +21,7 @@ DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
 
 
 def get_groq_model() -> str:
-    return os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")
+    return getattr(settings, "GROQ_MODEL", "") or DEFAULT_GROQ_MODEL
 
 
 class RAGServiceError(Exception):
@@ -175,29 +175,6 @@ Kurallar:
         top = scored[:limit]
         if not top:
             return candidate_chunks[:limit], keywords, 10
-        return [c for _, c in top], keywords, top[0][0]
-
-        def score_chunk(chunk: Mevzuat) -> int:
-            content_lower = clean_turkish(chunk.content or "")
-            title_lower = clean_turkish(chunk.title or "")
-            score = 0
-            if "mazeret" in cleaned_q and "mazeret" in content_lower:
-                score += 50
-            for i in range(len(keywords) - 1):
-                if f"{keywords[i]} {keywords[i + 1]}" in content_lower:
-                    score += 35
-            for kw in keywords:
-                if kw in title_lower:
-                    score += 20
-                score += content_lower.count(kw) * 3
-            return score
-
-        scored = [(score_chunk(c), c) for c in candidate_chunks]
-        scored = [(s, c) for s, c in scored if s >= MIN_RELEVANCE_SCORE]
-        scored.sort(key=lambda item: item[0], reverse=True)
-        top = scored[:limit]
-        if not top:
-            return [], keywords, 0
         return [c for _, c in top], keywords, top[0][0]
 
     @staticmethod

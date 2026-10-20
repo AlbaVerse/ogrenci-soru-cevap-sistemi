@@ -1,4 +1,5 @@
-﻿from datetime import timedelta
+﻿import logging
+from datetime import timedelta
 
 from django.utils import timezone
 from django.utils.dateparse import parse_date
@@ -7,8 +8,11 @@ from rest_framework.authentication import TokenAuthentication
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
+from accounts.authentication import OptionalTokenAuthentication
+from accounts.exceptions import ApiError
 from mevzuat_app.selectors import (
     get_analytics_dashboard_metrics,
     get_user_chat_sessions,
@@ -19,7 +23,9 @@ from mevzuat_app.serializers import (
     ChatQueryResponseSerializer,
     ChatSessionSerializer,
 )
-from mevzuat_app.services import ChatService
+from mevzuat_app.services import ChatPersistenceError, ChatService, RAGServiceError
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_range(request):
@@ -40,18 +46,30 @@ def _parse_range(request):
 
 
 class ChatQueryView(APIView):
+    # Herkese açık; ancak tarayıcıda kalmış ESKİ/başka ortamdan kalma token 401 üretmesin diye
+    # geçersiz token anonim sayılır.
+    authentication_classes = [OptionalTokenAuthentication]
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]  # Groq kotasını korur
+    throttle_scope = "chat"
 
     def post(self, request: Request) -> Response:
         serializer = ChatQueryRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         user = request.user if request.user.is_authenticated else None
-        result = ChatService().process_user_query(
-            question_text=serializer.validated_data["question"],
-            session_id=serializer.validated_data.get("session_id"),
-            user=user,
-        )
+        try:
+            result = ChatService().process_user_query(
+                question_text=serializer.validated_data["question"],
+                session_id=serializer.validated_data.get("session_id"),
+                user=user,
+            )
+        except RAGServiceError:
+            logger.exception("RAG/LLM servisi yanıt veremedi.")
+            raise ApiError(503, "llm_unavailable",
+                           "Yapay zekâ servisi şu anda yanıt veremiyor. Lütfen biraz sonra tekrar deneyin.")
+        except ChatPersistenceError:
+            raise ApiError(500, "persistence_failed", "Yanıt kaydedilemedi. Lütfen tekrar deneyin.")
         return Response(
             ChatQueryResponseSerializer(result).data,
             status=status.HTTP_200_OK,

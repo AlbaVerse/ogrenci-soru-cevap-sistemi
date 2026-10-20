@@ -3,6 +3,21 @@ import { mapConversation, mapConversations, mapMessage } from "@/services/adapte
 
 const STORAGE_KEY = "albaverse_chat_sessions"
 
+// Backend session_id'yi UUID v4 olarak doğrular. crypto.randomUUID yalnızca güvenli bağlamda
+// (https / localhost) vardır; http://<LAN-IP> üzerinde olmadığı için yedek üretici gerekir.
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const isUuid = (v) => typeof v === "string" && UUID_V4.test(v)
+function generateUuid() {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID()
+  const bytes = new Uint8Array(16)
+  if (typeof crypto !== "undefined" && crypto.getRandomValues) crypto.getRandomValues(bytes)
+  else for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256)
+  bytes[6] = (bytes[6] & 0x0f) | 0x40
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
+  const h = [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("")
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`
+}
+
 function loadStorage() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -41,7 +56,7 @@ export const chatApi = {
   },
 
   async createConversation(params) {
-    const newId = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `session-${Date.now()}`
+    const newId = generateUuid()
     const now = new Date().toISOString()
     const newConv = {
       id: newId,
@@ -75,11 +90,12 @@ export const chatApi = {
   },
 
   async sendMessage(id, content) {
-    const sessionId = id || "default-session"
+    const sessionId = id || generateUuid()
 
+    // UUID olmayan eski yerel oturum kimliklerinde session_id gönderilmez (backend yenisini üretir).
     const response = await http.post("/chat/query/", {
       question: content,
-      session_id: sessionId,
+      ...(isUuid(sessionId) ? { session_id: sessionId } : {}),
     })
 
     const now = new Date().toISOString()

@@ -5,6 +5,8 @@ from typing import Optional
 
 from rest_framework import serializers
 
+from mevzuat_app.selectors import get_mevzuat_citations
+
 MAX_QUESTION_LENGTH = 2000
 
 
@@ -43,10 +45,8 @@ class ChatQueryResponseSerializer(serializers.Serializer):
     response_time_ms = serializers.IntegerField(source="rag_response.response_time_ms")
 
     def get_sources(self, obj):
-        try:
-            return MevzuatCitationSerializer(obj.answer.kaynak_mevzuatlar.all(), many=True).data
-        except Exception:
-            return []
+        citations = get_mevzuat_citations(mevzuat_ids=obj.rag_response.mevzuat_ids)
+        return MevzuatCitationSerializer(citations, many=True).data
 
 
 class ChatSessionSerializer(serializers.Serializer):

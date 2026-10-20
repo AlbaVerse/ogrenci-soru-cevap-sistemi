@@ -1,4 +1,4 @@
-﻿import os
+import os
 from django.contrib import admin
 from django.urls import include, path
 from django.http import JsonResponse, FileResponse, Http404
@@ -7,23 +7,34 @@ from django.conf import settings
 def home_view(request):
     return JsonResponse({"status": "active", "message": "AlbaVerse Backend API is running successfully!"})
 
+ALLOWED_MEDIA_TYPES = {
+    ".pdf": "application/pdf",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
+# Yalnızca mevzuat klasörleri (kök dizindeki .py/.sqlite3/.env gibi dosyalar ASLA sunulmaz).
+MEDIA_FOLDERS = ("YÖNETMELİKLER", "YÖNERGELER", "USUL ESASLAR", "POLİTİKALAR VE REHBERLİK", "YÖK MEVZUAT",
+                 "data", os.path.join("mevzuat_app", "data"))
+
+
 def serve_mevzuat_file(request, filename):
-    """Mevzuat klasorlerindeki PDF/DOCX dosyalarini guvenli sekilde sunar."""
-    base_dir = settings.BASE_DIR
-    search_dirs = [
-        os.path.join(base_dir, "mevzuat_app", "data"),
-        os.path.join(base_dir, "mevzuat"),
-        os.path.join(base_dir, "data"),
-        base_dir,
-    ]
+    """Mevzuat PDF/DOCX dosyalarını sunar; yalnızca izinli uzantı ve klasörlerden."""
+    filename = os.path.basename(filename)  # path traversal'a karşı
+    ext = os.path.splitext(filename)[1].lower()
+    content_type = ALLOWED_MEDIA_TYPES.get(ext)
+    if not content_type:
+        raise Http404("Dosya bulunamadi")
 
-    for d in search_dirs:
-        for root, _, files in os.walk(d):
+    base = str(settings.BASE_DIR)
+    candidates = [os.path.join(base, filename)]  # kök dizindeki PDF'ler (ör. BAP Yönerge_2023.pdf)
+    for folder in MEDIA_FOLDERS:
+        for root, _, files in os.walk(os.path.join(base, folder)):
             if filename in files:
-                target_path = os.path.join(root, filename)
-                return FileResponse(open(target_path, "rb"), content_type="application/pdf")
-
+                candidates.append(os.path.join(root, filename))
+    for path in candidates:
+        if os.path.isfile(path):
+            return FileResponse(open(path, "rb"), content_type=content_type)
     raise Http404("Dosya bulunamadi")
+
 
 urlpatterns = [
     path("", home_view),
