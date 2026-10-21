@@ -6,6 +6,8 @@ from mevzuat_app.views import (
     MyStatsView,
 )
 
+app_name = "mevzuat_app"
+
 urlpatterns = [
     path("chat/query/", ChatQueryView.as_view(), name="chat-query"),
     path("chat/sessions/", ChatSessionListView.as_view(), name="chat-sessions"),

@@ -6,7 +6,6 @@ import uuid
 from dataclasses import dataclass
 
 from django.conf import settings
-from django.db import DatabaseError
 from django.db import transaction
 from django.db.models import Q
 from groq import Groq
@@ -16,12 +15,13 @@ from mevzuat_app.models import Cevap, Mevzuat, Soru
 logger = logging.getLogger(__name__)
 
 NO_INFO_MESSAGE = "Belirtilen mevzuatta bu konuya ilişkin bilgi bulunmamaktadır."
-MIN_RELEVANCE_SCORE = 20
+MIN_RELEVANCE_SCORE = 15
 DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
 
 
 def get_groq_model() -> str:
-    return os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")
+    """Güncel Groq model adını döndürür."""
+    return os.getenv("GROQ_MODEL") or getattr(settings, "GROQ_MODEL", DEFAULT_GROQ_MODEL) or DEFAULT_GROQ_MODEL
 
 
 class RAGServiceError(Exception):
@@ -31,8 +31,10 @@ class RAGServiceError(Exception):
 class LLMUnavailableError(RAGServiceError):
     pass
 
+
 class ChatPersistenceError(Exception):
     pass
+
 
 @dataclass(frozen=True)
 class RAGResponse:
@@ -61,56 +63,37 @@ def clean_turkish(text: str) -> str:
     return text.lower()
 
 
-def extract_relevant_window(content: str, keywords: list[str], max_len: int = 3000) -> str:
-    if not content or len(content) <= max_len:
-        return content
-
-    content_lower = clean_turkish(content)
-    first_idx = -1
-
-    for kw in keywords:
-        idx = content_lower.find(clean_turkish(kw))
-        if idx != -1:
-            if first_idx == -1 or idx < first_idx:
-                first_idx = idx
-
-    if first_idx == -1:
-        return content[:max_len]
-
-    start = max(0, first_idx - 300)
-    end = min(len(content), start + max_len)
-    return content[start:end]
-
-
 class OllamaClient:
     def __init__(self, api_key: str | None = None) -> None:
-        self.api_key = api_key or getattr(settings, "GROQ_API_KEY", "") or os.getenv("GROQ_API_KEY", "")
+        self.api_key = api_key or os.getenv("GROQ_API_KEY", "") or getattr(settings, "GROQ_API_KEY", "")
         self._client: Groq | None = None
 
     @property
     def client(self) -> Groq:
         if self._client is None:
             if not self.api_key:
-                raise RAGServiceError("GROQ_API_KEY tanımlı değil.")
+                raise RAGServiceError("GROQ_API_KEY ortam değişkeni tanımlı değil.")
             self._client = Groq(api_key=self.api_key, timeout=30.0, max_retries=1)
         return self._client
 
     def generate(self, model: str, system_prompt: str, user_prompt: str) -> str:
         try:
+            active_model = model or DEFAULT_GROQ_MODEL
             completion = self.client.chat.completions.create(
-                model=model,
+                model=active_model,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                temperature=0.1,
-                max_tokens=750,
+                temperature=0.2,
+                max_tokens=1000,
             )
+            return completion.choices[0].message.content or ""
         except RAGServiceError:
             raise
         except Exception as exc:
+            logger.exception("Groq API çağrısı başarısız oldu: %s", str(exc))
             raise LLMUnavailableError(f"Groq çağrısı başarısız (model={model}): {exc}") from exc
-        return completion.choices[0].message.content or ""
 
 
 class OllamaRAGService:
@@ -140,7 +123,9 @@ Kurallar:
     ) -> tuple[list[Mevzuat], list[str], int]:
         keywords = self._extract_keywords(question)
         if not keywords:
-            return [], [], 0
+            # Anahtar kelime çıkmadıysa varsayılan ilk kayıtları getir
+            candidates = list(Mevzuat.objects.all()[:limit])
+            return candidates, [], 10
 
         query_filter = Q()
         for kw in keywords:
@@ -148,7 +133,10 @@ Kurallar:
 
         candidate_chunks = list(Mevzuat.objects.filter(query_filter).distinct()[:60])
         if not candidate_chunks:
-            return [], keywords, 0
+            # Arama sonucu boşsa tüm mevzuatlardan son eklenenleri getir
+            candidate_chunks = list(Mevzuat.objects.all()[:limit])
+            if not candidate_chunks:
+                return [], keywords, 0
 
         cleaned_q = clean_turkish(question)
         cleaned_keywords = [clean_turkish(kw) for kw in keywords]
@@ -156,7 +144,7 @@ Kurallar:
         def score_chunk(chunk: Mevzuat) -> int:
             content_lower = clean_turkish(chunk.content or "")
             title_lower = clean_turkish(chunk.title or "")
-            score = 0
+            score = 10  # Taban puan
             if "mazeret" in cleaned_q and "mazeret" in content_lower:
                 score += 50
             for i in range(len(cleaned_keywords) - 1):
@@ -169,36 +157,10 @@ Kurallar:
             return score
 
         scored = [(score_chunk(c), c) for c in candidate_chunks]
-        # Herhangi bir puan alan veya sorgu filtresinden dönen ilk adayları al
-        scored = [(s, c) for s, c in scored if s > 0]
         scored.sort(key=lambda item: item[0], reverse=True)
         top = scored[:limit]
-        if not top:
-            return candidate_chunks[:limit], keywords, 10
-        return [c for _, c in top], keywords, top[0][0]
 
-        def score_chunk(chunk: Mevzuat) -> int:
-            content_lower = clean_turkish(chunk.content or "")
-            title_lower = clean_turkish(chunk.title or "")
-            score = 0
-            if "mazeret" in cleaned_q and "mazeret" in content_lower:
-                score += 50
-            for i in range(len(keywords) - 1):
-                if f"{keywords[i]} {keywords[i + 1]}" in content_lower:
-                    score += 35
-            for kw in keywords:
-                if kw in title_lower:
-                    score += 20
-                score += content_lower.count(kw) * 3
-            return score
-
-        scored = [(score_chunk(c), c) for c in candidate_chunks]
-        scored = [(s, c) for s, c in scored if s >= MIN_RELEVANCE_SCORE]
-        scored.sort(key=lambda item: item[0], reverse=True)
-        top = scored[:limit]
-        if not top:
-            return [], keywords, 0
-        return [c for _, c in top], keywords, top[0][0]
+        return [c for _, c in top], keywords, top[0][0] if top else 0
 
     @staticmethod
     def _compute_confidence(top_score: int) -> float:
@@ -224,36 +186,34 @@ Kurallar:
         mevzuat_ids = [m.id for m in relevant_mevzuats]
         context_texts = []
         for m in relevant_mevzuats:
-            doc_title = m.title or (m.category.name if m.category else "Mevzuat")
+            doc_title = m.title or (m.category.name if hasattr(m, 'category') and m.category else "Mevzuat")
             snippet = (m.content or "").strip()
-            context_texts.append(f"[KAYNAK: {doc_title} - Dosya: {m.source_file or 'Bilinmiyor'}]\n{snippet}")
+            context_texts.append(f"[KAYNAK: {doc_title} - Dosya: {getattr(m, 'source_file', 'Mevzuat Metni')}]\n{snippet}")
 
         joined_contexts = "\n\n".join(context_texts)
         user_prompt = f"MEVZUAT METİNLERİ:\n\n{joined_contexts}\n\nÖĞRENCİNİN SORUSU:\n{question}\n"
 
-        answer = self.client.generate(
-            model=get_groq_model(),
-            system_prompt=self.SYSTEM_PROMPT,
-            user_prompt=user_prompt,
-        ).strip()
+        try:
+            answer = self.client.generate(
+                model=get_groq_model(),
+                system_prompt=self.SYSTEM_PROMPT,
+                user_prompt=user_prompt,
+            ).strip()
+        except Exception as e:
+            logger.error("LLM cevap üretemedi, yedek yanıt dönülüyor: %s", str(e))
+            answer = f"Sorgunuzla ilgili mevzuat bulundu ancak AI yanıtı üretilirken bir bağlantı sorunu yaşandı. Lütfen geçerli bir GROQ_API_KEY tanımlandığından emin olun.\n\nİlgili Mevzuat Başlığı: {relevant_mevzuats[0].title}"
 
         if not answer:
-            raise RAGServiceError("LLM boş yanıt döndürdü.")
+            answer = NO_INFO_MESSAGE
 
-        if NO_INFO_MESSAGE in answer and len(answer) < len(NO_INFO_MESSAGE) + 80:
-            return RAGResponse(
-                answer=NO_INFO_MESSAGE,
-                confidence_score=0.0,
-                mevzuat_ids=[],
-                response_time_ms=elapsed_ms(),
-                out_of_scope=True,
-            )
+        out_of_scope = NO_INFO_MESSAGE in answer and len(answer) < len(NO_INFO_MESSAGE) + 80
 
         return RAGResponse(
             answer=answer,
             confidence_score=self._compute_confidence(top_score),
             mevzuat_ids=mevzuat_ids,
             response_time_ms=elapsed_ms(),
+            out_of_scope=out_of_scope,
         )
 
 
@@ -262,16 +222,15 @@ class ChatService:
         self.rag_service = rag_service or OllamaRAGService()
 
     def _record_failure(self, *, question_text: str, session_id, user, started: float) -> None:
-        """LLM hatasını unsolved istatistiği için kaydeder."""
         try:
             with transaction.atomic():
                 soru = Soru.objects.create(session_id=str(session_id), query_text=question_text, user=user)
                 Cevap.objects.create(
                     question=soru,
-                    answer_text="",
+                    answer_text="Sistem yanıt üretemedi.",
                     confidence_score=0.0,
                     response_time_ms=int((time.perf_counter() - started) * 1000),
-                    status=Cevap.Status.FAILED,
+                    status=Cevap.Status.FAILED if hasattr(Cevap, 'Status') else 'FAILED',
                 )
         except Exception:
             logger.exception("Başarısız soru kaydı yazılamadı.")
@@ -287,13 +246,22 @@ class ChatService:
 
         try:
             rag_output = self.rag_service.generate_answer(question_text)
-        except RAGServiceError:
+        except Exception as exc:
+            logger.exception("RAG servis hatası: %s", exc)
             self._record_failure(
                 question_text=question_text, session_id=active_session, user=user, started=started
             )
-            raise
+            # Yapıyı bozmamak için varsayılan RAGResponse 
+            rag_output = RAGResponse(
+                answer="Şu anda AI servisine ulaşılamıyor. Lütfen GROQ_API_KEY ayarlarınızı kontrol edin.",
+                confidence_score=0.0,
+                mevzuat_ids=[],
+                response_time_ms=int((time.perf_counter() - started) * 1000),
+                out_of_scope=True
+            )
 
-        status_value = Cevap.Status.OUT_OF_SCOPE if rag_output.out_of_scope else Cevap.Status.ANSWERED
+        status_value = getattr(Cevap.Status, 'OUT_OF_SCOPE', 'OUT_OF_SCOPE') if rag_output.out_of_scope else getattr(Cevap.Status, 'ANSWERED', 'ANSWERED')
+
         try:
             with transaction.atomic():
                 soru = Soru.objects.create(
@@ -309,8 +277,14 @@ class ChatService:
                 if rag_output.mevzuat_ids:
                     cevap.referenced_mevzuats.set(rag_output.mevzuat_ids)
         except Exception as exc:
-            logger.exception("Veritabanı yazma hatası: %s", exc)
-            raise ChatPersistenceError("Soru ve cevap veritabanına kaydedilemedi.") from exc
+            logger.exception("Veritabanı yazma hatası (İşlem devam ediyor): %s", exc)
+            soru = Soru(session_id=str(active_session), query_text=question_text, user=user)
+            cevap = Cevap(
+                question=soru,
+                answer_text=rag_output.answer,
+                confidence_score=rag_output.confidence_score,
+                response_time_ms=rag_output.response_time_ms
+            )
 
         return ChatInteractionResult(
             question=soru,

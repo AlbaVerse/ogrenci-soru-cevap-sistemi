@@ -4,7 +4,7 @@ from groq import Groq
 
 load_dotenv()
 
-MODEL_NAME = "qwen/qwen3.8-27b"
+MODEL_NAME = "llama-3.3-70b-versatile"
 
 
 class OllamaClientError(RuntimeError):
