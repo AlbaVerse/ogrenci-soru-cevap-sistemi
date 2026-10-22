@@ -1,5 +1,5 @@
 import { BrowserRouter } from 'react-router-dom'
-import { AuthProvider } from '@/context/AuthProvider'
+import { AuthProvider } from '@/context/auth-context'
 import { ThemeProvider } from '@/context/ThemeProvider'
 import { ToastProvider } from '@/context/ToastProvider'
 import { AppRoutes } from './AppRoutes'

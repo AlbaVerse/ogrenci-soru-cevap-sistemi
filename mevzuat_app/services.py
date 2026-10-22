@@ -3,24 +3,23 @@ import os
 import re
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import List, Optional, Tuple
 
 from django.conf import settings
 from django.db import transaction
 from django.db.models import Q
 from groq import Groq
 
-from mevzuat_app.models import Cevap, Mevzuat, Soru
+from mevzuat_app.models import Cevap, Kaynak, Mevzuat, Soru
 
 logger = logging.getLogger(__name__)
 
 NO_INFO_MESSAGE = "Belirtilen mevzuatta bu konuya ilişkin bilgi bulunmamaktadır."
-MIN_RELEVANCE_SCORE = 15
-DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
+DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b"
 
 
 def get_groq_model() -> str:
-    """Güncel Groq model adını döndürür."""
     return os.getenv("GROQ_MODEL") or getattr(settings, "GROQ_MODEL", DEFAULT_GROQ_MODEL) or DEFAULT_GROQ_MODEL
 
 
@@ -32,15 +31,11 @@ class LLMUnavailableError(RAGServiceError):
     pass
 
 
-class ChatPersistenceError(Exception):
-    pass
-
-
 @dataclass(frozen=True)
 class RAGResponse:
     answer: str
     confidence_score: float
-    mevzuat_ids: list[int]
+    mevzuat_ids: List[int]
     response_time_ms: int
     out_of_scope: bool = False
 
@@ -55,25 +50,30 @@ class ChatInteractionResult:
 def clean_turkish(text: str) -> str:
     if not text:
         return ""
-    mapping = {
-        "İ": "i", "I": "ı", "Ş": "ş", "Ğ": "ğ", "Ü": "ü", "Ö": "ö", "Ç": "ç"
+    rep = {
+        "çn": "çin",
+        "dl": "dil",
+        "tarthn": "tarihini",
+        "brmler": "birimler",
+        "İ": "İ",
+        "I": "I",
     }
-    for upper_ch, lower_ch in mapping.items():
-        text = text.replace(upper_ch, lower_ch)
-    return text.lower()
+    for k, v in rep.items():
+        text = text.replace(k, v)
+    return text
 
 
 class OllamaClient:
-    def __init__(self, api_key: str | None = None) -> None:
+    def __init__(self, api_key: Optional[str] = None) -> None:
         self.api_key = api_key or os.getenv("GROQ_API_KEY", "") or getattr(settings, "GROQ_API_KEY", "")
-        self._client: Groq | None = None
+        self._client: Optional[Groq] = None
 
     @property
     def client(self) -> Groq:
         if self._client is None:
             if not self.api_key:
                 raise RAGServiceError("GROQ_API_KEY ortam değişkeni tanımlı değil.")
-            self._client = Groq(api_key=self.api_key, timeout=30.0, max_retries=1)
+            self._client = Groq(api_key=self.api_key, timeout=60.0, max_retries=2)
         return self._client
 
     def generate(self, model: str, system_prompt: str, user_prompt: str) -> str:
@@ -89,8 +89,6 @@ class OllamaClient:
                 max_tokens=1000,
             )
             return completion.choices[0].message.content or ""
-        except RAGServiceError:
-            raise
         except Exception as exc:
             logger.exception("Groq API çağrısı başarısız oldu: %s", str(exc))
             raise LLMUnavailableError(f"Groq çağrısı başarısız (model={model}): {exc}") from exc
@@ -101,29 +99,28 @@ class OllamaRAGService:
 Görevin, sana verilen MEVZUAT METİNLERİ'ne dayanarak öğrencinin sorusunu açıklayıcı, yardımsever ve net bir şekilde cevaplamaktır.
 
 Kurallar:
-1. Verilen mevzuat metinlerinde geçen ilgili tüm bilgileri (dilekçe süreci, yönetim kurulu onayı, ücret durumu, süreler vb.) öğrenciye özetle.
-2. Öğrencinin sorduğu soruyla ilişkili herhangi bir bilgi, usul veya madde parçası varsa kesinlikle "bilgi bulunmamaktadır" DEME; metindeki mevcut bilgileri aktar.
-3. Yalnızca verilen metinlerde sorulan konuyla uzaktan yakından hiçbir alaka veya anahtar kelime yoksa "Belirtilen mevzuatta bu konuya ilişkin bilgi bulunmamaktadır." yaz.
+1. Verilen mevzuat metinlerinde geçen ilgili tüm bilgileri özetle.
+2. Öğrencinin sorduğu soruyla ilişkili herhangi bir bilgi veya madde parçası varsa kesinlikle "bilgi bulunmamaktadır" DEME.
+3. Yalnızca verilen metinlerde sorulan konuyla hiçbir alaka yoksa "Belirtilen mevzuatta bu konuya ilişkin bilgi bulunmamaktadır." yaz.
 4. Yanıtın her zaman nazik, düzenli maddeler içeren ve Türkçe olsun."""
 
-    def __init__(self, client: OllamaClient | None = None) -> None:
+    def __init__(self, client: Optional[OllamaClient] = None) -> None:
         self.client = client or OllamaClient()
 
-    def _extract_keywords(self, question: str) -> list[str]:
+    def _extract_keywords(self, question: str) -> List[str]:
         words = re.findall(r"\w+", clean_turkish(question))
         stopwords = {
             "ve", "veya", "ile", "bir", "bu", "şu", "o", "da", "de", "mi", "mı",
-            "mu", "mü", "nasıl", "ne", "nedir", "nelerdir", "için", "olan", "olarak", "su", "var",
+            "mu", "mü", "nasıl", "ne", "nedir", "nelerdir", "için", "olan", "olarak",
             "göre", "kadar", "hakkında", "şartları", "yönetmeliği", "yönergesi"
         }
         return [w for w in words if len(w) > 2 and w not in stopwords]
 
     def _retrieve_relevant_chunks(
-        self, question: str, limit: int = 8
-    ) -> tuple[list[Mevzuat], list[str], int]:
+        self, question: str, limit: int = 4
+    ) -> Tuple[List[Mevzuat], List[str], int]:
         keywords = self._extract_keywords(question)
         if not keywords:
-            # Anahtar kelime çıkmadıysa varsayılan ilk kayıtları getir
             candidates = list(Mevzuat.objects.all()[:limit])
             return candidates, [], 10
 
@@ -133,7 +130,6 @@ Kurallar:
 
         candidate_chunks = list(Mevzuat.objects.filter(query_filter).distinct()[:60])
         if not candidate_chunks:
-            # Arama sonucu boşsa tüm mevzuatlardan son eklenenleri getir
             candidate_chunks = list(Mevzuat.objects.all()[:limit])
             if not candidate_chunks:
                 return [], keywords, 0
@@ -144,7 +140,7 @@ Kurallar:
         def score_chunk(chunk: Mevzuat) -> int:
             content_lower = clean_turkish(chunk.content or "")
             title_lower = clean_turkish(chunk.title or "")
-            score = 10  # Taban puan
+            score = 10
             if "mazeret" in cleaned_q and "mazeret" in content_lower:
                 score += 50
             for i in range(len(cleaned_keywords) - 1):
@@ -172,7 +168,7 @@ Kurallar:
         def elapsed_ms() -> int:
             return int((time.perf_counter() - start_time) * 1000)
 
-        relevant_mevzuats, keywords, top_score = self._retrieve_relevant_chunks(question, limit=8)
+        relevant_mevzuats, keywords, top_score = self._retrieve_relevant_chunks(question, limit=4)
 
         if not relevant_mevzuats:
             return RAGResponse(
@@ -183,15 +179,21 @@ Kurallar:
                 out_of_scope=True,
             )
 
-        mevzuat_ids = [m.id for m in relevant_mevzuats]
+        mevzuat_ids = [m.id for m in relevant_mevzuats if hasattr(m, 'id')]
         context_texts = []
+        MAX_CHARS_PER_CHUNK = 1500
         for m in relevant_mevzuats:
-            doc_title = m.title or (m.category.name if hasattr(m, 'category') and m.category else "Mevzuat")
-            snippet = (m.content or "").strip()
-            context_texts.append(f"[KAYNAK: {doc_title} - Dosya: {getattr(m, 'source_file', 'Mevzuat Metni')}]\n{snippet}")
+            doc_title = getattr(m, 'title', 'Mevzuat')
+            snippet = (getattr(m, 'content', '') or "").strip()[:MAX_CHARS_PER_CHUNK]
+            context_texts.append(f"[KAYNAK: {doc_title}]\n{snippet}")
 
         joined_contexts = "\n\n".join(context_texts)
         user_prompt = f"MEVZUAT METİNLERİ:\n\n{joined_contexts}\n\nÖĞRENCİNİN SORUSU:\n{question}\n"
+
+        # Scope hatalarını önlemek için değişkenler başında güvenli şekilde tanımlanıyor
+        first_doc = relevant_mevzuats[0] if relevant_mevzuats else None
+        doc_title = getattr(first_doc, 'title', 'Mevzuat') if first_doc else "Mevzuat"
+        summary_snippet = clean_turkish(getattr(first_doc, 'content', '')[:400]) if (first_doc and getattr(first_doc, 'content', None)) else "Metin özetlenemedi."
 
         try:
             answer = self.client.generate(
@@ -200,8 +202,20 @@ Kurallar:
                 user_prompt=user_prompt,
             ).strip()
         except Exception as e:
-            logger.error("LLM cevap üretemedi, yedek yanıt dönülüyor: %s", str(e))
-            answer = f"Sorgunuzla ilgili mevzuat bulundu ancak AI yanıtı üretilirken bir bağlantı sorunu yaşandı. Lütfen geçerli bir GROQ_API_KEY tanımlandığından emin olun.\n\nİlgili Mevzuat Başlığı: {relevant_mevzuats[0].title}"
+            import traceback
+            traceback.print_exc()
+            logger.exception("LLM cevap üretemedi: %s", str(e))
+
+            first_doc = relevant_mevzuats[0] if relevant_mevzuats else None
+            doc_title = getattr(first_doc, 'title', 'Mevzuat') if first_doc else "Mevzuat"
+            raw_content = getattr(first_doc, 'content', '') if first_doc else ""
+            summary_snippet = clean_turkish(raw_content[:400]) if raw_content else "İlgili mevzuat metni özetlenemedi."
+
+            answer = (
+                f"**İlgili Mevzuat:** {doc_title}\n\n"
+                f"**Mevzuat Metin Özeti:**\n{summary_snippet}...\n\n"
+                f"*(Sistem Notu: {type(e).__name__} - {str(e)})*"
+            )
 
         if not answer:
             answer = NO_INFO_MESSAGE
@@ -218,22 +232,8 @@ Kurallar:
 
 
 class ChatService:
-    def __init__(self, rag_service: OllamaRAGService | None = None) -> None:
+    def __init__(self, rag_service: Optional[OllamaRAGService] = None) -> None:
         self.rag_service = rag_service or OllamaRAGService()
-
-    def _record_failure(self, *, question_text: str, session_id, user, started: float) -> None:
-        try:
-            with transaction.atomic():
-                soru = Soru.objects.create(session_id=str(session_id), query_text=question_text, user=user)
-                Cevap.objects.create(
-                    question=soru,
-                    answer_text="Sistem yanıt üretemedi.",
-                    confidence_score=0.0,
-                    response_time_ms=int((time.perf_counter() - started) * 1000),
-                    status=Cevap.Status.FAILED if hasattr(Cevap, 'Status') else 'FAILED',
-                )
-        except Exception:
-            logger.exception("Başarısız soru kaydı yazılamadı.")
 
     def process_user_query(
         self,
@@ -248,19 +248,15 @@ class ChatService:
             rag_output = self.rag_service.generate_answer(question_text)
         except Exception as exc:
             logger.exception("RAG servis hatası: %s", exc)
-            self._record_failure(
-                question_text=question_text, session_id=active_session, user=user, started=started
-            )
-            # Yapıyı bozmamak için varsayılan RAGResponse 
             rag_output = RAGResponse(
-                answer="Şu anda AI servisine ulaşılamıyor. Lütfen GROQ_API_KEY ayarlarınızı kontrol edin.",
+                answer=f"AI Bağlantı Hatası ({type(exc).__name__}): {str(exc)}",
                 confidence_score=0.0,
                 mevzuat_ids=[],
                 response_time_ms=int((time.perf_counter() - started) * 1000),
                 out_of_scope=True
             )
 
-        status_value = getattr(Cevap.Status, 'OUT_OF_SCOPE', 'OUT_OF_SCOPE') if rag_output.out_of_scope else getattr(Cevap.Status, 'ANSWERED', 'ANSWERED')
+        status_value = getattr(Cevap.Status, 'OUT_OF_SCOPE', 'out_of_scope') if rag_output.out_of_scope else getattr(Cevap.Status, 'ANSWERED', 'answered')
 
         try:
             with transaction.atomic():
@@ -277,7 +273,7 @@ class ChatService:
                 if rag_output.mevzuat_ids:
                     cevap.referenced_mevzuats.set(rag_output.mevzuat_ids)
         except Exception as exc:
-            logger.exception("Veritabanı yazma hatası (İşlem devam ediyor): %s", exc)
+            logger.exception("Veritabanı yazma hatası: %s", exc)
             soru = Soru(session_id=str(active_session), query_text=question_text, user=user)
             cevap = Cevap(
                 question=soru,

@@ -44,10 +44,10 @@ class ChatQueryResponseSerializer(serializers.Serializer):
 
     def get_sources(self, obj):
         try:
-            return MevzuatCitationSerializer(obj.answer.kaynak_mevzuatlar.all(), many=True).data
+            mevzuats = obj.answer.referenced_mevzuats.all()
+            return MevzuatCitationSerializer(mevzuats, many=True).data
         except Exception:
             return []
-
 
 class ChatSessionSerializer(serializers.Serializer):
     id = serializers.CharField()

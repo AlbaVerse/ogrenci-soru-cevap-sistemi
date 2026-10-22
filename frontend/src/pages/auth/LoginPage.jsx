@@ -29,7 +29,7 @@ export function LoginPage() {
     const email = normalizeEmail(values.email)
     try {
       await login({ email, password: values.password })
-      navigate(ROUTES.home, { replace: true }) // Başarılı girişten sonra karşılama ana sayfası
+      navigate(ROUTES.home, { replace: true })
     } catch (err) {
       if (err?.code === 'email_not_verified') {
         navigate(ROUTES.verifyPending, { state: { email } })
